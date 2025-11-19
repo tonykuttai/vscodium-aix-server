@@ -296,19 +296,6 @@ crontab -l
 tail -50 ~/.vscodium-build-cache/logs/cron-wrapper.log
 ```
 
-## Checking Build Status
-
-Use the status checker:
-```
-bash scripts/check-status.sh
-```
-
-This displays:
-- Last built version
-- Recent build logs
-- Cron job configuration
-- Recent releases
-
 ## Manual Upload
 
 If automated upload fails, upload manually:
