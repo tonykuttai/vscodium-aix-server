@@ -15,6 +15,8 @@ VSCodium Remote Server does not officially support AIX. This project bridges tha
 ## Target Users
 
 This is designed for development teams using IBM AIX systems who want to use VSCodium's remote development capabilities.
+[AIX remote ssh extension](https://github.com/tonykuttai/open-remote-ssh) uses the VSCodium servers in this repo to enable
+remote SSH development on AIX Machines.
 
 ## Contributing
 
