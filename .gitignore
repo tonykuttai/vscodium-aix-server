@@ -1,0 +1,16 @@
+# Build artifacts and releases
+releases/*
+*.tar.gz
+*.tar.gz.sha256
+*.tar.gz.backup-*
+*.backup-*
+
+# Build directories
+scripts/vscodium-servers/
+
+# System files
+.DS_Store
+*.swp
+*.swo
+*~
+

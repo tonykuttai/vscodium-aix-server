@@ -1,0 +1,191 @@
+==========================================================================
+   VSCodium Remote Server - AIX Build System
+==========================================================================
+Build Directory: /tmp/vscodium-remote-aix/node_modules
+Server Directory: /tmp/vscodium-remote-aix/server
+Platform: AIX 00CE97F74C00
+Node.js: v22.17.0
+Date: Wed Nov 19 13:13:15 EST 2025
+==========================================================================
+
+=== Setting up AIX build environment ===
+Setting up AIX build environment...
+Environment variables set:
+  CXXFLAGS: -ftls-model=global-dynamic -fPIC -pthread
+  CFLAGS: -ftls-model=global-dynamic -fPIC -pthread
+  PATH: /opt/freeware/bin:/opt/nodejs/bin:/home/varghese/bin:/home/varghese/.aix-remote:/home/varghese/.vscodium-server/bin/9e6954323e23e2f62c1ea78348dbd1b53e5b827e/bin/remote-cli:/opt/freeware/bin:/opt/nodejs/bin:/usr/bin:/etc:/usr/sbin:/usr/ucb:/usr/bin/X11:/sbin:/usr/java8_64/jre/bin:/usr/java8_64/bin:/home/varghese/local/bin:/home/varghese/.vscodium-server/bin/9e6954323e23e2f62c1ea78348dbd1b53e5b827e/bin/remote-cli/:/opt/nodejs/bin:/home/varghese/.local/node_modules/.bin:/home/varghese/llvm/scripts:/home/varghese/llvm/scripts/build:/home/varghese/utility/ripgrep/target/release:/home/varghese/local/bin:/opt/freeware/bin:/home/varghese/.local/bin:/opt/freeware/bin:/opt/nodejs/bin:/usr/bin:/etc:/usr/sbin:/usr/ucb:/usr/bin/X11:/sbin:/home/varghese/llvm/dev/llvm-project/clang/tools/clang-format/
+Build tools detected:
+  Node.js: v22.17.0
+  gcc: gcc (GCC) 10.3.0
+  xlc: 
+  Python: Python 3.9.22
+Setting up portlibforaix library dependencies...
+portlibforaix already installed at /home/varghese/local/portlibforaix
+   libutil.so.2: -rw-r--r-- 1 varghese staff 35032 Jul 26 15:42 /home/varghese/local/portlibforaix/lib/libutil.so.2
+AIX build environment ready
+
+=== Step 1: Downloading VSCodium Server ===
+Checking for the latest release...
+Using GitHub token from ~/.config/github/token
+Using authenticated GitHub API request
+Latest version: vscodium-reh-linux-x64-1.105.17075.tar.gz
+Download URL: https://github.com/VSCodium/vscodium/releases/download/1.105.17075/vscodium-reh-linux-x64-1.105.17075.tar.gz
+Set ORIGINAL_TARBALL_NAME: vscodium-reh-linux-x64-1.105.17075.tar.gz
+Extracting server...
+Success! VSCodium Server extracted.
+
+=== Creating build directory ===
+Build directory: /tmp/vscodium-remote-aix/node_modules
+
+
+==========================================================================
+Building Module: native-watchdog
+==========================================================================
+Building native-watchdog...
+Build directory: /tmp/vscodium-remote-aix/node_modules/nativewatchdog
+Cloning repository...
+Configuring with node-gyp...
+
+Building...
+gmake: Entering directory '/tmp/vscodium-remote-aix/node_modules/nativewatchdog/node-native-watchdog/build'
+  CXX(target) Release/obj.target/watchdog/src/watchdog.o
+  SOLINK_MODULE(target) Release/obj.target/watchdog.node
+  COPY Release/watchdog.node
+gmake: Leaving directory '/tmp/vscodium-remote-aix/node_modules/nativewatchdog/node-native-watchdog/build'
+SUCCESS: native-watchdog built and verified
+[SUCCESS] native-watchdog built successfully
+
+==========================================================================
+Building Module: node-spdlog
+==========================================================================
+Building node-spdlog...
+Build directory: /tmp/vscodium-remote-aix/node_modules/nodespdlog
+Cloning repository...
+Initializing git submodules...
+Submodule path 'deps/spdlog': checked out '7e635fca68d014934b4af8a1cf874f63989352b7'
+Installing node dependencies (and building native module)...
+npm install finished with code: 0 (Proceeding to verification)
+SUCCESS: node-spdlog built and verified
+c[SUCCESS] node-spdlog built successfully
+
+==========================================================================
+Building Module: node-pty
+==========================================================================
+Building node-pty...
+Build directory: /tmp/vscodium-remote-aix/node_modules/nodepty
+Node.js version: 22.17.0
+portlibforaix already installed
+Cloning node-pty...
+Installing node dependencies...
+npm install finished with code: 0 (Proceeding to verification)
+Compiling source...
+Linking shared library...
+Testing module...
+✓ Module test passed!
+SUCCESS: node-pty built and tested
+[SUCCESS] node-pty built successfully
+
+==========================================================================
+Building Module: ripgrep
+==========================================================================
+Building ripgrep...
+Build directory: /tmp/vscodium-remote-aix/node_modules/ripgrep
+Cloning repository...
+Extracting memmap2 version...
+Detected memmap2 version: 0.9.9
+Cloning memmap2...
+Applying AIX fix to memmap2...
+Adding patch to Cargo.toml...
+Building ripgrep...
+Testing ripgrep...
+SUCCESS: ripgrep built and tested
+Binary location: /tmp/vscodium-remote-aix/node_modules/ripgrep/ripgrep/target/release/rg
+[SUCCESS] ripgrep built successfully
+
+=== Copying Built Modules to Server ===
+Copying native-watchdog...
+  ✓ Copied to: /tmp/vscodium-remote-aix/server/node_modules/native-watchdog/build/Release/watchdog.node
+Copying node-spdlog...
+  ✓ Copied to: /tmp/vscodium-remote-aix/server/node_modules/@vscode/spdlog/build/Release/spdlog.node
+Copying node-pty...
+  ✓ Copied to: /tmp/vscodium-remote-aix/server/node_modules/node-pty/build/Release/pty.node
+Copying ripgrep...
+  ✓ Copied to: /tmp/vscodium-remote-aix/server/node_modules/@vscode/ripgrep/bin/rg
+✓ All modules copied to server
+
+==========================================================================
+Building Module: deviceid
+==========================================================================
+Patching @vscode/deviceid for AIX...
+Server directory: /tmp/vscodium-remote-aix/server
+Module path: /tmp/vscodium-remote-aix/server/node_modules/@vscode/deviceid
+Creating backup...
+Patching index.js...
+✓ index.js patched successfully
+Patching storage.js...
+✓ storage.js patched successfully
+SUCCESS: @vscode/deviceid patched for AIX
+[SUCCESS] deviceid built successfully
+
+==========================================================================
+Building Module: platform-override
+==========================================================================
+Creating AIX platform override system...
+Server directory: /tmp/vscodium-remote-aix/server
+Creating platform override script...
+✓ Created: /tmp/vscodium-remote-aix/server/aix-platform-override.js
+Updating server wrapper...
+✓ Updated: /tmp/vscodium-remote-aix/server/bin/codium-server
+✓ Updated: /tmp/vscodium-remote-aix/server/bin/remote-cli/codium
+SUCCESS: Platform override system installed
+[SUCCESS] platform-override built successfully
+
+=== Copying Server to Local Directory ===
+Extracting commit ID from product.json...
+Commit ID: 14bd1561ce547502e6ff1968090dc18c49160aab
+
+WARNING: Directory already exists: /home/varghese/utility/vscodium-aix-server/scripts/vscodium-servers/14bd1561ce547502e6ff1968090dc18c49160aab
+Creating backup: /home/varghese/utility/vscodium-aix-server/scripts/vscodium-servers/14bd1561ce547502e6ff1968090dc18c49160aab.backup-20251119-131526
+Copying server to: /home/varghese/utility/vscodium-aix-server/scripts/vscodium-servers/14bd1561ce547502e6ff1968090dc18c49160aab
+✓ Server copied successfully
+
+Local copy created:
+  Location: /home/varghese/utility/vscodium-aix-server/scripts/vscodium-servers/14bd1561ce547502e6ff1968090dc18c49160aab
+  Commit: 14bd1561ce547502e6ff1968090dc18c49160aab
+  Version: 1.1.3
+1.105.0
+1.0.10
+1.105.17075
+  Size: 256M
+  Symlink: /home/varghese/utility/vscodium-aix-server/scripts/vscodium-servers/latest -> 14bd1561ce547502e6ff1968090dc18c49160aab
+Node wrapper created at /home/varghese/utility/vscodium-aix-server/scripts/vscodium-servers/latest/node
+
+=== Packaging Server for Release ===
+Original tarball: vscodium-reh-linux-x64-1.105.17075.tar.gz
+AIX package name: vscodium-reh-aix-ppc64-1.105.17075.tar.gz
+Version: 1.105.17075
+Commit ID: 14bd1561ce547502e6ff1968090dc18c49160aab
+
+Creating tarball...
+✓ Package created: /home/varghese/utility/vscodium-aix-server/scripts/../releases/1.105.17075/vscodium-reh-aix-ppc64-1.105.17075.tar.gz
+  Size: 75M
+
+Generating checksum...
+✓ Checksum: d934ddeb8ceb22c4fe8377300a9f27e18ce948d5e04a4d5d643148cc455916be
+  Saved to: /home/varghese/utility/vscodium-aix-server/scripts/../releases/1.105.17075/vscodium-reh-aix-ppc64-1.105.17075.tar.gz.sha256
+✓ Info file: /home/varghese/utility/vscodium-aix-server/scripts/../releases/1.105.17075/vscodium-reh-aix-ppc64-1.105.17075.info
+
+==========================================================================
+   Build Summary
+==========================================================================
+Modules Attempted: 6
+Modules Success:   6
+Modules Failed:    0
+==========================================================================
+
+[SUCCESS] All modules built successfully!
+
+Build artifacts:
+  Server: /home/varghese/utility/vscodium-aix-server/scripts/vscodium-servers/latest
+  Package: /home/varghese/utility/vscodium-aix-server/scripts/../releases/1.105.17075/vscodium-reh-aix-ppc64-1.105.17075.tar.gz
+  Checksum: /home/varghese/utility/vscodium-aix-server/scripts/../releases/1.105.17075/vscodium-reh-aix-ppc64-1.105.17075.tar.gz.sha256
