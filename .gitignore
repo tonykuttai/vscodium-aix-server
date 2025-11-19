@@ -14,3 +14,5 @@ scripts/vscodium-servers/
 *.swo
 *~
 
+*.log
+clean.sh
