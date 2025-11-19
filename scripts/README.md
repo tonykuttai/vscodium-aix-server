@@ -172,8 +172,7 @@ vscodium-aix-server/
 |   |-- build-vscodium-server-aix.sh    Main build orchestrator
 |   |-- auto-build-release.sh           Automation pipeline
 |   |-- cron-wrapper.sh                 Cron job wrapper
-|   |-- upload-release.sh               GitHub upload handler
-|   |-- check-status.sh                 Status checker
+|   |-- README.md                       Architecture overview
 |   |
 |   +-- modules/                        Individual module builders
 |   |   |-- build-native-watchdog.sh
@@ -186,6 +185,10 @@ vscodium-aix-server/
 |   |
 |   +-- utils/                          Utility scripts
 |   |   +-- aix-environment.sh          AIX build environment setup
+|   |   +-- upload-release.sh           GitHub upload handler
+|   |   +-- check-pre-requisites.sh     Check AIX prerequistes
+|   |   +-- package-existing.sh         Package existing vscodium server
+
 |   |
 |   +-- vscodium-servers/               Built servers (local cache)
 |       +-- COMMIT_ID/                  Server organized by commit
@@ -197,7 +200,7 @@ vscodium-aix-server/
 |       |-- vscodium-reh-aix-ppc64-VERSION.tar.gz.sha256
 |       +-- vscodium-reh-aix-ppc64-VERSION.info
 |
-+-- README.md                           This file
++-- README.md                           
 +-- LICENSE                             Project license
 ```
 
