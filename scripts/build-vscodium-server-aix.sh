@@ -327,13 +327,16 @@ create_node_wrapper() {
     # IMPORTANT: The content below must NOT be indented.
     cat > node << 'EOF'
 #!/usr/bin/env sh
-# Wrapper for AIX - uses system node path
-NODE_BIN=$(command -v node 2>/dev/null)
-if [ -z "$NODE_BIN" ]; then
-    echo "Error: node binary not found in PATH" >&2
+# Wrapper for AIX – uses system node path
+NODE_BIN="/opt/nodejs/bin/node"
+
+if [ ! -x "$NODE_BIN" ]; then
+    echo "Error: expected Node.js at $NODE_BIN but it's missing or not executable" >&2
     exit 1
 fi
+
 exec "$NODE_BIN" "$@"
+
 EOF
 
     chmod +x node

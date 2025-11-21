@@ -8,6 +8,7 @@ set -e
 #=============================================================================
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+UTILS_DIR="$SCRIPT_DIR/utils"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 BUILD_SCRIPTS_DIR="$SCRIPT_DIR"
 CACHE_DIR="$HOME/.vscodium-build-cache"
@@ -200,8 +201,8 @@ upload_release() {
     
     log "Version to upload: $latest_version"
     
-    # Change to scripts directory before running upload script
-    cd "$SCRIPT_DIR"
+    # Change to scripts/utils directory before running upload script
+    cd "$UTILS_DIR"
     
     # Run upload script
     if bash upload-release.sh "$latest_version" 2>&1 | tee -a "$LOG_FILE"; then
