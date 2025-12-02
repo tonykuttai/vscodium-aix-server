@@ -1,5 +1,9 @@
 #!/bin/bash
 # cron-wrapper.sh - Wrapper for cron job execution
+# Running every 4 hours
+# $ crontab -e 
+# 0 0,4,8,12,16,20 * * * /home/varghese/utility/vscodium-aix-server/scripts/cron-wrapper.sh
+# crontab -l
 
 # Source profile to get environment variables
 if [[ -f "$HOME/.profile" ]]; then
