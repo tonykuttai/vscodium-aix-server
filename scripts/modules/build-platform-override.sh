@@ -64,6 +64,10 @@ if [[ ! -x "$NODE_BIN" ]]; then
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SERVER_ROOT="$(dirname "$SCRIPT_DIR")"
+
+# Add node-pty native-libs to LIBPATH with absolute path
+export LIBPATH="${SERVER_ROOT}/node_modules/node-pty/lib/native-libs:${LIBPATH}"
 
 SERVER_MAIN=""
 if [[ -f "$SCRIPT_DIR/../out/server-main.js" ]]; then

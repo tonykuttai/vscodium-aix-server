@@ -162,7 +162,28 @@ copy_modules_to_server() {
         cp "$source_path" "$target_path"
         echo "  OK Copied to: $target_path"
     done
+
+    # Copy node-pty native libraries
+    echo ""
+    echo "Copying node-pty native libraries..."
+    local pty_native_libs_src="$BUILDDIR/nodepty/node-pty/lib/native-libs"
+    local pty_native_libs_dst="$VSCODIUM_LINUX_SERVER/node_modules/node-pty/lib/native-libs"
     
+    if [[ -d "$pty_native_libs_src" ]]; then
+        mkdir -p "$pty_native_libs_dst"
+        cp -r "$pty_native_libs_src/"* "$pty_native_libs_dst/"
+        echo "  OK Copied native-libs to: $pty_native_libs_dst"
+        
+        # Verify the copy
+        if [[ -f "$pty_native_libs_dst/libutil.so.2" ]]; then
+            echo "  OK Verified: libutil.so.2 present"
+        else
+            echo "  WARNING: libutil.so.2 not found after copy"
+        fi
+    else
+        echo "  WARNING: Native libs directory not found: $pty_native_libs_src"
+    fi
+        
     echo "OK All modules copied to server"
 }
 

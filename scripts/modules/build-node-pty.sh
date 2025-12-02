@@ -63,6 +63,18 @@ if [[ ! -d "node-pty" ]]; then
 fi
 
 cd "node-pty"
+mkdir -p lib/native-libs
+
+# Copy required libraries from portlibforaix
+echo "Copying required libraries to native-libs..."
+if [ -f "$PORTLIB_INSTALL/lib/libutil.so.2" ]; then
+    cp "$PORTLIB_INSTALL/lib/libutil.so.2" lib/native-libs/
+    echo "✓ Copied libutil.so.2"
+else
+    echo "ERROR: libutil.so.2 not found in portlibforaix"
+    echo "Please build portlibforaix first"
+    exit 1
+fi
 
 # Install dependencies
 echo "Installing node dependencies..."
@@ -94,8 +106,8 @@ g++ -shared -maix64 \
   -pthread \
   -o build/Release/pty.node \
   build/Release/pty.o \
-  -L$PORTLIB_INSTALL/lib \
-  $PORTLIB_INSTALL/lib/libutil.so.2 \
+  -L../../lib/native-libs \
+  ./lib/native-libs/libutil.so.2 \
   -lpthread \
   -lstdc++
 
