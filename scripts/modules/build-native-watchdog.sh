@@ -37,6 +37,9 @@ fi
 
 cd "node-native-watchdog"
 
+# Microsoft have added fstack-protector-strong flag in the buld. this is breaking the build for AIX
+sed -i 's/, "-fstack-protector-strong"//' binding.gyp
+
 # Configure and build
 echo "Configuring with node-gyp..."
 node-gyp configure

@@ -37,6 +37,8 @@ fi
 
 cd "node-spdlog"
 
+sed -i "/fstack-protector-strong/d" binding.gyp
+
 # Initialize submodules BEFORE npm install
 echo "Initializing git submodules..."
 git submodule update --init --recursive
