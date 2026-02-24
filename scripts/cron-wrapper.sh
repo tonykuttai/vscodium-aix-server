@@ -14,6 +14,9 @@ if [[ -f "$HOME/.bashrc" ]]; then
     source "$HOME/.bashrc"
 fi
 
+export PATH="/opt/freeware/bin:$HOME/.local/node_modules/.bin:$PATH"
+
+
 # Set working directory
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"

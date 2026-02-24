@@ -192,7 +192,8 @@ upload_release() {
     local releases_dir="$PROJECT_ROOT/releases"
     log "Looking for releases in: $releases_dir"
     
-    local latest_version=$(ls -1 "$releases_dir" | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
+    # local latest_version=$(ls -1 "$releases_dir" | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
+    local latest_version=$(ls -1 "$releases_dir" | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -t. -k1,1n -k2,2n -k3,3n | tail -1)
     
     if [[ -z "$latest_version" ]]; then
         log "ERROR: No version found in releases directory"
