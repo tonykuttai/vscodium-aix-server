@@ -56,10 +56,17 @@ if [[ -f "$SERVER_SCRIPT" ]]; then
     
     cat > "$SERVER_SCRIPT" << 'EOF'
 #!/bin/bash
-NODE_BIN="/opt/nodejs/bin/node"
 
-if [[ ! -x "$NODE_BIN" ]]; then
-    echo "ERROR: Node.js not found at $NODE_BIN"
+NODE_BIN=""
+for _candidate in /opt/nodejs/bin/node /usr/local/bin/node /usr/bin/node; do
+    if [ -x "$_candidate" ]; then
+        NODE_BIN="$_candidate"
+        break
+    fi
+done
+
+if [ -z "$NODE_BIN" ]; then
+    echo "ERROR: Node.js not found at any known location" >&2
     exit 1
 fi
 
@@ -106,10 +113,16 @@ COMMIT="$COMMIT"
 EXEC_NAME="codium"
 CLI_SCRIPT="\$ROOT/out/server-cli.js"
 
-NODE_BIN="/opt/nodejs/bin/node"
+NODE_BIN=""
+for _candidate in /opt/nodejs/bin/node /usr/local/bin/node /usr/bin/node; do
+    if [ -x "\$_candidate" ]; then
+        NODE_BIN="\$_candidate"
+        break
+    fi
+done
 
-if [[ ! -x "\$NODE_BIN" ]]; then
-    echo "ERROR: Node.js not found at \$NODE_BIN"
+if [ -z "\$NODE_BIN" ]; then
+    echo "ERROR: Node.js not found at any known location" >&2
     exit 1
 fi
 
