@@ -105,15 +105,7 @@ setup_aix_environment() {
     export CFLAGS="-ftls-model=global-dynamic -fPIC -pthread"
     
     # Ensure freeware tools are in PATH
-    NODE_BIN="$(which node)"
-    if [[ -z "$NODE_BIN" ]]; then
-        echo "Error: Node.js not found in PATH"
-        echo "   Please ensure node is installed and in PATH"
-        return 1
-    fi
-
-    NODE_DIR="$(dirname "$NODE_BIN")"
-    export PATH="/opt/freeware/bin:$NODE_DIR:$PATH"
+    export PATH="/opt/freeware/bin:/opt/nodejs/bin:$PATH"
     
     # Set npm configuration for AIX
     export npm_config_target_arch=ppc64
