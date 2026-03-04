@@ -349,7 +349,7 @@ create_node_wrapper() {
     cat > node << 'EOF'
 #!/usr/bin/env sh
 # Wrapper for AIX – uses system node path
-NODE_BIN="/opt/nodejs/bin/node"
+NODE_BIN="$(which node)"
 
 if [ ! -x "$NODE_BIN" ]; then
     echo "Error: expected Node.js at $NODE_BIN but it's missing or not executable" >&2
