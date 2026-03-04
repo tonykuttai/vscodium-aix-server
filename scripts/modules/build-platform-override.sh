@@ -56,7 +56,7 @@ if [[ -f "$SERVER_SCRIPT" ]]; then
     
     cat > "$SERVER_SCRIPT" << 'EOF'
 #!/bin/bash
-NODE_BIN="$(which node)"
+NODE_BIN="/opt/nodejs/bin/node"
 
 if [[ ! -x "$NODE_BIN" ]]; then
     echo "ERROR: Node.js not found at $NODE_BIN"
@@ -106,7 +106,7 @@ COMMIT="$COMMIT"
 EXEC_NAME="codium"
 CLI_SCRIPT="\$ROOT/out/server-cli.js"
 
-NODE_BIN="$(which node)"
+NODE_BIN="/opt/nodejs/bin/node"
 
 if [[ ! -x "\$NODE_BIN" ]]; then
     echo "ERROR: Node.js not found at \$NODE_BIN"
