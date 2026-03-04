@@ -88,12 +88,22 @@ echo "npm install finished with code: $NPM_EXIT_CODE (Proceeding to verification
 # Create build directory
 mkdir -p build/Release
 
+NODE_BIN="$(which node)"
+if [ -z "$NODE_BIN" ]; then
+    echo "ERROR: Node.js not found in PATH"
+    exit 1
+fi
+
+NODE_DIR="$(dirname "$NODE_BIN")"
+NODE_INCLUDE="$(dirname "$NODE_DIR")/include/node"
+
 # Compile
 echo "Compiling source..."
 g++ -o build/Release/pty.o -c src/unix/pty.cc \
-  -I/opt/nodejs/include/node \
+  -I$NODE_INCLUDE \
   -I$HOME/.cache/node-gyp/${NODE_VERSION}/include/node \
   -I./node_modules/node-addon-api \
+  -I$PORTLIB_INSTALL/include \
   -I/opt/freeware/include \
   -std=gnu++17 -D_GLIBCXX_USE_CXX11_ABI=0 \
   -fPIC -pthread -Wall -Wextra -Wno-unused-parameter \
@@ -102,7 +112,7 @@ g++ -o build/Release/pty.o -c src/unix/pty.cc \
 # Link
 echo "Linking shared library..."
 g++ -shared -maix64 \
-  -Wl,-bimport:/opt/nodejs/include/node/node.exp \
+  -Wl,-bimport:$NODE_INCLUDE/node.exp \
   -pthread \
   -o build/Release/pty.node \
   build/Release/pty.o \
@@ -113,6 +123,8 @@ g++ -shared -maix64 \
 
 # Test module
 echo "Testing module..."
+# Set LIBPATH to include native-libs directory for AIX
+export LIBPATH="$(pwd)/lib/native-libs:${LIBPATH}"
 node -e "
 try {
   const pty = require('./build/Release/pty.node');
