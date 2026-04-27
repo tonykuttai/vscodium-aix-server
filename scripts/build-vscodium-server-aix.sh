@@ -132,6 +132,7 @@ copy_modules_to_server() {
     # Define source and target paths
     local modules=(
         "native-watchdog|nativewatchdog/node-native-watchdog/build/Release/watchdog.node|node_modules/native-watchdog/build/Release/watchdog.node"
+        "native-watchdog-vscode|nativewatchdog/node-native-watchdog/build/Release/watchdog.node|node_modules/@vscode/native-watchdog/build/Release/watchdog.node"
         "node-spdlog|nodespdlog/node-spdlog/build/Release/spdlog.node|node_modules/@vscode/spdlog/build/Release/spdlog.node"
         "node-pty|nodepty/node-pty/build/Release/pty.node|node_modules/node-pty/build/Release/pty.node"
         "ripgrep|ripgrep/ripgrep/target/release/rg|node_modules/@vscode/ripgrep/bin/rg"
