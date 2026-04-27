@@ -73,8 +73,29 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 SERVER_ROOT="$(dirname "$SCRIPT_DIR")"
 
+# Dynamically find GCC C++ runtime libraries
+GCC_LIBPATH=""
+if command -v gcc >/dev/null 2>&1; then
+    GCC_VERSION=$(gcc -dumpversion)
+    GCC_MACHINE=$(gcc -dumpmachine)
+    # Try common GCC library locations
+    for _gcc_base in /opt/freeware/lib/gcc /usr/local/lib/gcc /usr/lib/gcc; do
+        if [ -d "$_gcc_base/$GCC_MACHINE/$GCC_VERSION/pthread/ppc64" ]; then
+            GCC_LIBPATH="$_gcc_base/$GCC_MACHINE/$GCC_VERSION/pthread/ppc64"
+            break
+        elif [ -d "$_gcc_base/$GCC_MACHINE/$GCC_VERSION/ppc64" ]; then
+            GCC_LIBPATH="$_gcc_base/$GCC_MACHINE/$GCC_VERSION/ppc64"
+            break
+        elif [ -d "$_gcc_base/$GCC_MACHINE/$GCC_VERSION" ]; then
+            GCC_LIBPATH="$_gcc_base/$GCC_MACHINE/$GCC_VERSION"
+            break
+        fi
+    done
+fi
+
 # Add node-pty native-libs to LIBPATH with absolute path
-export LIBPATH="${SERVER_ROOT}/node_modules/node-pty/lib/native-libs:${LIBPATH}"
+# Build LIBPATH with all required directories
+export LIBPATH="${GCC_LIBPATH:+$GCC_LIBPATH:}${SERVER_ROOT}/node_modules/node-pty/lib/native-libs:${LIBPATH}"
 
 SERVER_MAIN=""
 if [[ -f "$SCRIPT_DIR/../out/server-main.js" ]]; then
