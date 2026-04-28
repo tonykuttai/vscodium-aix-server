@@ -136,6 +136,7 @@ copy_modules_to_server() {
         "node-spdlog|nodespdlog/node-spdlog/build/Release/spdlog.node|node_modules/@vscode/spdlog/build/Release/spdlog.node"
         "node-pty|nodepty/node-pty/build/Release/pty.node|node_modules/node-pty/build/Release/pty.node"
         "ripgrep|ripgrep/ripgrep/target/release/rg|node_modules/@vscode/ripgrep/bin/rg"
+        "parcel-watcher|parcelwatcher/watcher/build/Release/watcher.node|node_modules/@parcel/watcher/build/Release/watcher.node"
     )
     
     for module_spec in "${modules[@]}"; do
@@ -597,6 +598,7 @@ main() {
     run_module_build "node-spdlog"
     run_module_build "node-pty"
     run_module_build "ripgrep"
+    run_module_build "parcel-watcher"
 
     # Copy built modules to server
     copy_modules_to_server
