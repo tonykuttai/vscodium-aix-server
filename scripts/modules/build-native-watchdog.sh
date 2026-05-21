@@ -40,12 +40,20 @@ cd "node-native-watchdog"
 # Microsoft have added fstack-protector-strong flag in the buld. this is breaking the build for AIX
 sed -i 's/, "-fstack-protector-strong"//' binding.gyp
 
-# Configure and build
+# Install dependencies (including node-gyp)
+echo "Installing dependencies..."
+set +e
+npm install --no-progress --no-audit --no-fund --loglevel=error > "$MODULE_DIR/npm-install.log" 2>&1
+NPM_EXIT_CODE=$?
+set -e
+echo "npm install finished with code: $NPM_EXIT_CODE (Proceeding to build)"
+
+# Configure and build using npx to use local node-gyp
 echo "Configuring with node-gyp..."
-node-gyp configure
+npx node-gyp configure
 
 echo "Building..."
-node-gyp build
+npx node-gyp build
 
 # Verify build
 NODE_FILE="build/Release/watchdog.node"
