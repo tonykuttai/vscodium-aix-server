@@ -4,12 +4,13 @@
 
 set -e
 
+# Set the environment variables
 BUILDDIR="$1"
 SERVER_DIR="$2"
 
 if [[ -z "$BUILDDIR" ]]; then
-    echo "Usage: $0 <build_directory> <server_directory>"
-    exit 1
+  echo "Usage: $0 <build_directory> <server_directory>"
+  exit 1
 fi
 
 MODULE_NAME="node-pty"
@@ -23,8 +24,8 @@ echo "Build directory: $MODULE_DIR"
 
 # Skip if already built
 if [[ -f "$MODULE_DIR/.build-complete" ]]; then
-    echo "$MODULE_NAME already built"
-    exit 0
+  echo "$MODULE_NAME already built"
+  exit 0
 fi
 
 # Get Node.js version
@@ -37,29 +38,29 @@ cd "$MODULE_DIR"
 
 # Build portlibforaix if not installed
 if [[ ! -f "$PORTLIB_INSTALL/lib/libutil.so.2" ]]; then
-    echo "Building portlibforaix dependency..."
-    
-    if [[ ! -d "portlibforaix" ]]; then
-        git clone "$PORTLIB_URL" portlibforaix
-    fi
-    
-    cd portlibforaix
-    mkdir -p "$PORTLIB_INSTALL/lib"
-    mkdir -p "$PORTLIB_INSTALL/include"
-    
-    make
-    make install
-    
-    cd "$MODULE_DIR"
-    echo "portlibforaix built successfully"
+  echo "Building portlibforaix dependency..."
+
+  if [[ ! -d "portlibforaix" ]]; then
+    git clone "$PORTLIB_URL" portlibforaix
+  fi
+
+  cd portlibforaix
+  mkdir -p "$PORTLIB_INSTALL/lib"
+  mkdir -p "$PORTLIB_INSTALL/include"
+
+  make
+  make install
+
+  cd "$MODULE_DIR"
+  echo "portlibforaix built successfully"
 else
-    echo "portlibforaix already installed"
+  echo "portlibforaix already installed"
 fi
 
 # Clone node-pty if not exists
 if [[ ! -d "node-pty" ]]; then
-    echo "Cloning node-pty..."
-    git clone "$NODEPTY_URL" node-pty
+  echo "Cloning node-pty..."
+  git clone "$NODEPTY_URL" node-pty
 fi
 
 cd "node-pty"
@@ -68,19 +69,19 @@ mkdir -p lib/native-libs
 # Copy required libraries from portlibforaix
 echo "Copying required libraries to native-libs..."
 if [ -f "$PORTLIB_INSTALL/lib/libutil.so.2" ]; then
-    cp "$PORTLIB_INSTALL/lib/libutil.so.2" lib/native-libs/
-    echo "✓ Copied libutil.so.2"
+  cp "$PORTLIB_INSTALL/lib/libutil.so.2" lib/native-libs/
+  echo "✓ Copied libutil.so.2"
 else
-    echo "ERROR: libutil.so.2 not found in portlibforaix"
-    echo "Please build portlibforaix first"
-    exit 1
+  echo "ERROR: libutil.so.2 not found in portlibforaix"
+  echo "Please build portlibforaix first"
+  exit 1
 fi
 
 # Install dependencies
 echo "Installing node dependencies..."
 set +e
 # Redirect all output to log file
-npm install --no-progress --no-audit --no-fund --loglevel=error > "$MODULE_DIR/npm-install.log" 2>&1
+npm install --no-progress --no-audit --no-fund --loglevel=error >"$MODULE_DIR/npm-install.log" 2>&1
 NPM_EXIT_CODE=$?
 set -e
 echo "npm install finished with code: $NPM_EXIT_CODE (Proceeding to verification)"
@@ -124,10 +125,11 @@ try {
 }"
 
 if [[ $? -eq 0 ]]; then
-    echo "SUCCESS: $MODULE_NAME built and tested"
-    touch "$MODULE_DIR/.build-complete"
-    exit 0
+  echo "SUCCESS: $MODULE_NAME built and tested"
+  touch "$MODULE_DIR/.build-complete"
+  exit 0
 else
-    echo "ERROR: Module test failed"
-    exit 1
+  echo "ERROR: Module test failed"
+  exit 1
 fi
+
