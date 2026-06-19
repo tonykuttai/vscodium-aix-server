@@ -89,12 +89,19 @@ echo "npm install finished with code: $NPM_EXIT_CODE (Proceeding to verification
 # Create build directory
 mkdir -p build/Release
 
+# Use environment CC/CXX if set, otherwise default to gcc/g++
+CC="${CC:-gcc}"
+CXX="${CXX:-g++}"
+
+echo "Using compilers: CC=$CC, CXX=$CXX"
+
 # Compile
 echo "Compiling source..."
-g++ -o build/Release/pty.o -c src/unix/pty.cc \
+$CXX -o build/Release/pty.o -c src/unix/pty.cc \
   -I/opt/nodejs/include/node \
   -I$HOME/.cache/node-gyp/${NODE_VERSION}/include/node \
   -I./node_modules/node-addon-api \
+  -I$PORTLIB_INSTALL/include \
   -I/opt/freeware/include \
   -std=gnu++17 -D_GLIBCXX_USE_CXX11_ABI=0 \
   -fPIC -pthread -Wall -Wextra -Wno-unused-parameter \
@@ -102,7 +109,7 @@ g++ -o build/Release/pty.o -c src/unix/pty.cc \
 
 # Link
 echo "Linking shared library..."
-g++ -shared -maix64 \
+$CXX -shared -maix64 \
   -Wl,-bimport:/opt/nodejs/include/node/node.exp \
   -pthread \
   -o build/Release/pty.node \
