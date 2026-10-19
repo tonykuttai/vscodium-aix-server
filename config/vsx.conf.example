@@ -1,0 +1,58 @@
+# vsx configuration
+#
+# Copy to ~/.config/vsx/vsx.conf (or point VSX_CONFIG at it). Plain shell
+# KEY=value lines. Environment variables with the same names override this
+# file. Everything here has a default; only VSX_EMAIL_TO really needs setting.
+
+# ---- notifications -----------------------------------------------------
+VSX_EMAIL_TO="you@example.com"
+#VSX_EMAIL_FROM="vsx@$(hostname)"
+#VSX_EMAIL_ENABLED=true          # failure emails + daily digest
+#VSX_DIGEST_ENABLED=true         # one summary email per day, even when quiet
+#VSX_ISSUES_ENABLED=true         # open/close GitHub issues for failures
+#VSX_ISSUE_LABEL=build-failure
+
+# ---- repositories ------------------------------------------------------
+#VSX_UPSTREAM_REPO=VSCodium/vscodium
+#VSX_RELEASE_REPO=tonykuttai/vscodium-aix-server
+#VSX_GITHUB_TOKEN_FILE=$HOME/.config/github/token   # or export GITHUB_TOKEN
+
+# ---- what to build -----------------------------------------------------
+# `vsx build --missing` / `vsx cron` consider every upstream release newer
+# than this floor that is not yet published.
+#VSX_BACKFILL_FLOOR=1.126.04524
+# A version that fails this many times is parked until the retry window
+# passes (or `vsx build --retry`).
+#VSX_MAX_ATTEMPTS=3
+#VSX_RETRY_AFTER_HOURS=24
+
+# ---- node runtime ------------------------------------------------------
+# bundle: ship the official nodejs.org aix-ppc64 Node that matches upstream's
+#         target major inside the tarball (self-contained; recommended).
+# host:   build against and dispatch to VSX_HOST_NODE (legacy behaviour).
+#VSX_NODE_RUNTIME=bundle
+#VSX_HOST_NODE=/opt/nodejs/bin/node
+#VSX_NODE_FALLBACK_VERSION=24.21.0
+
+# ---- directories -------------------------------------------------------
+#VSX_STATE_DIR=$HOME/.local/state/vsx     # lock, logs, events, attempts
+#VSX_CACHE_DIR=$HOME/.cache/vsx           # downloads, node runtimes, module builds, work trees
+#VSX_RELEASES_DIR=$VSX_HOME/releases      # packaged tarballs
+#VSX_PORTLIB_DIR=$HOME/local/portlibforaix
+
+# ---- retention ---------------------------------------------------------
+#VSX_KEEP_RELEASES=3   # local release dirs + upstream downloads to keep
+#VSX_KEEP_LOGS=40
+
+# ---- smoke test --------------------------------------------------------
+#VSX_SMOKE_TIMEOUT=120  # seconds to wait for "Extension host agent listening"
+
+# ---- module sources (point at forks if needed) -------------------------
+#VSX_REPO_NODE_PTY=https://github.com/microsoft/node-pty.git
+#VSX_REPO_SPDLOG=https://github.com/microsoft/node-spdlog.git
+#VSX_REPO_WATCHDOG=https://github.com/microsoft/node-native-watchdog.git
+#VSX_REPO_PARCEL_WATCHER=https://github.com/parcel-bundler/watcher.git
+#VSX_REPO_RIPGREP=https://github.com/BurntSushi/ripgrep.git
+#VSX_REPO_MEMMAP2=https://github.com/RazrFalcon/memmap2-rs.git
+#VSX_REPO_PORTLIB=https://github.com/tonykuttai/portlibforaix.git
+#VSX_RIPGREP_FALLBACK_TAG=15.0.0

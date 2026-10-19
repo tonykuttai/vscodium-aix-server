@@ -1,18 +1,16 @@
-# Build artifacts and releases
-releases/*
+# Packaged artifacts (published to GitHub releases, never committed)
+releases/
 *.tar.gz
 *.tar.gz.sha256
-*.tar.gz.backup-*
 *.backup-*
 
-# Build directories
-scripts/vscodium-servers/
+# Logs and local state live under ~/.local/state/vsx and ~/.cache/vsx,
+# but guard against accidental copies in the checkout.
+*.log
+.vsx-*/
 
-# System files
+# Editors / OS
 .DS_Store
 *.swp
 *.swo
 *~
-
-*.log
-clean.sh

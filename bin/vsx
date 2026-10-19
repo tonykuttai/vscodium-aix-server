@@ -1,0 +1,531 @@
+#!/usr/bin/env bash
+#
+# vsx - VSCodium Remote Server for AIX: build, verify, publish.
+#
+#   vsx check                         host / toolchain / config report
+#   vsx config                        effective configuration
+#   vsx releases                      upstream vs published vs local table
+#   vsx build VERSION... [opts]       build (and publish) specific versions
+#   vsx build --latest  [opts]        newest upstream release
+#   vsx build --missing [opts]        every upstream release not yet published
+#   vsx upload VERSION [--force]      publish an already packaged version
+#   vsx smoke SERVER_DIR              start-up test of an extracted server
+#   vsx module NAME VSCODIUM_VERSION  build one module against that server
+#   vsx prune [--dry-run] [--legacy]  apply retention to local artifacts
+#   vsx cron                          what the cron job runs (lock, missing,
+#                                     prune, digest, log rotation)
+#   vsx notify-test                   send a test email
+#
+# Build options:
+#   --no-upload   package only          --force      rebuild/re-upload anyway
+#   --keep-work   keep work tree        --retry      ignore attempt limits
+#   --no-smoke    skip start-up test (debugging only; never for releases)
+#
+# Configuration: ~/.config/vsx/vsx.conf (see config/vsx.conf.example) or
+# VSX_* environment variables.
+
+set -Eeuo pipefail
+
+VSX_HOME="$(cd "$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")/.." && pwd)"
+export VSX_HOME
+
+# shellcheck source=../lib/common.sh
+source "$VSX_HOME/lib/common.sh"
+# shellcheck source=../lib/config.sh
+source "$VSX_HOME/lib/config.sh"
+# shellcheck source=../lib/env.sh
+source "$VSX_HOME/lib/env.sh"
+# shellcheck source=../lib/github.sh
+source "$VSX_HOME/lib/github.sh"
+# shellcheck source=../lib/notify.sh
+source "$VSX_HOME/lib/notify.sh"
+# shellcheck source=../lib/server.sh
+source "$VSX_HOME/lib/server.sh"
+# shellcheck source=../lib/modules.sh
+source "$VSX_HOME/lib/modules.sh"
+
+config_load
+env_setup_path
+env_detect_toolchain
+
+usage() { sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'; }
+
+# Every build/upload/cron invocation logs to its own file unless the parent
+# already set one (child processes inherit it).
+start_run_log() {
+    local tag=$1
+    if [[ -z "${VSX_RUN_ID:-}" ]]; then
+        VSX_RUN_ID="$(date '+%Y%m%d-%H%M%S')-$tag"
+        export VSX_RUN_ID
+    fi
+    if [[ -z "$VSX_LOG_FILE" ]]; then
+        VSX_LOG_FILE="$VSX_LOG_DIR/$VSX_RUN_ID.log"
+        export VSX_LOG_FILE
+        : >"$VSX_LOG_FILE"
+    fi
+    info "run $VSX_RUN_ID (log: $VSX_LOG_FILE)"
+}
+
+#=============================================================================
+# check / config / releases
+#=============================================================================
+cmd_check() {
+    echo "vsx $(git -C "$VSX_HOME" rev-parse --short HEAD 2>/dev/null || echo '?') at $VSX_HOME"
+    echo "config: ${VSX_CONFIG_FILE:-<defaults>}"
+    echo
+    env_report
+    echo
+    local rc=0
+    if [[ "$(uname -s)" != "AIX" ]]; then
+        echo "NOTE: not an AIX host; only lint and read-only commands work here."
+    else
+        env_check_gnu_tools && echo "GNU grep/sed/tar/sort: ok" || rc=1
+        require_cmd git gcc g++ gmake python3 curl tar file sha256sum patch strip 2>/dev/null \
+            && echo "build tools: ok" || rc=1
+        have cargo && have rustc && echo "rust: ok" || { echo "rust: MISSING (ripgrep cannot be built)"; rc=1; }
+        have mailx || have mail || have sendmail || echo "mail: no mailx/mail/sendmail; email notifications will fail"
+    fi
+    env_load_github_token || { echo "GitHub token: MISSING ($VSX_GITHUB_TOKEN_FILE or GITHUB_TOKEN)"; rc=1; }
+    [[ -n "$VSX_EMAIL_TO" ]] || echo "VSX_EMAIL_TO not set: no emails will be sent"
+    echo
+    (( rc == 0 )) && echo "OK" || echo "PROBLEMS FOUND"
+    return $rc
+}
+
+cmd_config() { config_show; }
+
+cmd_releases() {
+    env_load_github_token || warn "no GitHub token; unauthenticated API (rate limited)"
+    local upstream published v tag local_pkg count status
+    upstream=$(upstream_versions_since "$VSX_BACKFILL_FLOOR")
+    published=$(our_release_tags)
+    printf '%-16s %-10s %-8s %-9s %s\n' VERSION PUBLISHED LOCAL ATTEMPTS STATUS
+    for v in $upstream; do
+        status="pending"
+        grep -qx "$v" <<<"$published" && { tag=yes; status="ok"; } || tag=no
+        [[ -f "$VSX_RELEASES_DIR/$v/vscodium-reh-aix-ppc64-$v.tar.gz" ]] && local_pkg=yes || local_pkg=no
+        read -r count _ < <(attempts_get "$v")
+        if [[ "$tag" == no ]] && attempts_should_skip "$v"; then status="parked (failed ${count}x)"; fi
+        printf '%-16s %-10s %-8s %-9s %s\n' "$v" "$tag" "$local_pkg" "$count" "$status"
+    done
+    echo
+    echo "upstream latest:  $(upstream_latest_version)"
+    echo "published latest: $(printf '%s\n' "$published" | ver_max)"
+    echo "floor:            $VSX_BACKFILL_FLOOR"
+}
+
+#=============================================================================
+# build
+#=============================================================================
+BUILD_NO_UPLOAD=false
+BUILD_FORCE=false
+BUILD_KEEP_WORK=false
+BUILD_RETRY=false
+BUILD_NO_SMOKE=false
+
+parse_build_opts() {
+    BUILD_VERSIONS=()
+    BUILD_SELECT=""
+    while (( $# > 0 )); do
+        case "$1" in
+            --no-upload) BUILD_NO_UPLOAD=true ;;
+            --force)     BUILD_FORCE=true ;;
+            --keep-work) BUILD_KEEP_WORK=true ;;
+            --retry)     BUILD_RETRY=true ;;
+            --no-smoke)  BUILD_NO_SMOKE=true ;;
+            --latest|--missing) BUILD_SELECT="$1" ;;
+            -h|--help)   usage; exit 0 ;;
+            -*)          die "unknown option: $1" ;;
+            *)           BUILD_VERSIONS+=("$1") ;;
+        esac
+        shift
+    done
+}
+
+build_child_flags() {
+    local f=()
+    $BUILD_NO_UPLOAD && f+=(--no-upload)
+    $BUILD_FORCE     && f+=(--force)
+    $BUILD_KEEP_WORK && f+=(--keep-work)
+    $BUILD_NO_SMOKE  && f+=(--no-smoke)
+    printf '%s\n' "${f[@]}"
+}
+
+# pending_versions : upstream versions above the floor that are not published
+# (and not parked by the attempt limiter unless --retry/--force).
+pending_versions() {
+    local published v
+    published=$(our_release_tags)
+    for v in $(upstream_versions_since "$VSX_BACKFILL_FLOOR"); do
+        if grep -qx "$v" <<<"$published" && ! $BUILD_FORCE; then continue; fi
+        if ! $BUILD_RETRY && ! $BUILD_FORCE && attempts_should_skip "$v"; then
+            warn "skipping $v: failed $VSX_MAX_ATTEMPTS times; use --retry or wait ${VSX_RETRY_AFTER_HOURS}h"
+            continue
+        fi
+        echo "$v"
+    done
+}
+
+cmd_build() {
+    parse_build_opts "$@"
+    env_require_build_tools
+    env_check_gnu_tools
+    env_load_github_token || die "GitHub token required (set GITHUB_TOKEN or $VSX_GITHUB_TOKEN_FILE)"
+    start_run_log build
+
+    local -a versions=()
+    case "$BUILD_SELECT" in
+        --latest)  versions=("$(upstream_latest_version)") ;;
+        --missing) mapfile -t versions < <(pending_versions) ;;
+        "")        versions=("${BUILD_VERSIONS[@]}") ;;
+    esac
+    if (( ${#versions[@]} == 0 )); then
+        info "nothing to build"
+        return 0
+    fi
+    info "versions to build: ${versions[*]}"
+
+    local v rc=0 failed=() built=()
+    local -a flags
+    mapfile -t flags < <(build_child_flags)
+    for v in "${versions[@]}"; do
+        # A separate process keeps errexit semantics intact inside the build
+        # (bash disables -e inside anything tested by if/||).
+        set +e
+        "$VSX_HOME/bin/vsx" __build-one "$v" "${flags[@]}"
+        rc=$?
+        set -e
+        if (( rc == 0 )); then built+=("$v"); else failed+=("$v"); fi
+    done
+    section "Build summary"
+    info "built:  ${built[*]:-none}"
+    info "failed: ${failed[*]:-none}"
+    (( ${#failed[@]} == 0 ))
+}
+
+# __build-one VERSION [flags] : the actual pipeline for one version. Runs in
+# its own process; notifies on failure via the EXIT trap.
+cmd___build_one() {
+    local version=$1; shift
+    parse_build_opts "$@"
+    start_run_log "build-$version"
+    local stage="start"
+    _build_exit() {
+        local rc=$?
+        if (( rc != 0 )); then
+            notify_failure "$version" "stage '$stage' failed" "$VSX_LOG_FILE"
+        fi
+    }
+    trap _build_exit EXIT
+
+    section "Building VSCodium $version for AIX"
+    attempts_bump "$version"
+    local work server
+    work=$(work_dir_for "$version")
+    server="$work/server"
+    if $BUILD_FORCE; then rm -rf "$work"; fi
+    mkdir -p "$work"
+    rm -f "$work/manifest.json"
+
+    stage="fetch";   server_fetch "$version"
+    stage="runtime"; node_runtime_select "$version"
+    manifest_set "$work" version "$version"
+    manifest_set "$work" commit "$(server_commit "$server")"
+    manifest_set "$work" built "$(now_iso)"
+    manifest_set "$work" node.version "$VSX_NODE_VERSION"
+    manifest_set "$work" node.abi "$VSX_NODE_ABI"
+    manifest_set "$work" node.source "$VSX_NODE_SOURCE"
+    manifest_set "$work" node.upstream_target "${VSX_NODE_UPSTREAM_TARGET:-}"
+    manifest_set "$work" toolchain.gcc "$VSX_GCC_VERSION"
+    manifest_set "$work" toolchain.rustc "$VSX_RUSTC_VERSION"
+    manifest_set "$work" toolchain.host "$(hostname) $VSX_OS_LEVEL"
+
+    local m
+    for m in "${VSX_MODULES[@]}"; do
+        stage="module:$m"
+        module_run "$m" "$server" "$work"
+    done
+
+    stage="runtime-install"; server_install_node "$server"
+    stage="launchers";       server_install_launchers "$server"
+
+    local foreign
+    foreign=$(server_foreign_binaries "$server" | tr '\n' ' ')
+    if [[ -n "$foreign" ]]; then
+        warn "foreign (Linux) native binaries remain, loaded lazily or unused on AIX: $foreign"
+        manifest_set "$work" foreign_binaries "$foreign"
+    fi
+
+    if $BUILD_NO_SMOKE; then
+        warn "smoke test SKIPPED (--no-smoke)"
+        manifest_set "$work" smoke_test "skipped"
+    else
+        stage="smoke"; server_smoke_test "$server"
+        manifest_set "$work" smoke_test "passed"
+    fi
+
+    stage="package"; server_package "$version"
+    event_record built "$version" "packaged"
+
+    if $BUILD_NO_UPLOAD; then
+        info "--no-upload: package left in $VSX_RELEASES_DIR/$version"
+    else
+        stage="upload"; upload_version "$version" "$BUILD_FORCE"
+    fi
+
+    if $BUILD_KEEP_WORK; then
+        info "work tree kept: $work"
+    else
+        rm -rf "$work"
+    fi
+    attempts_clear "$version"
+    section "Done: $version"
+}
+
+#=============================================================================
+# upload
+#=============================================================================
+upload_version() {
+    local version=$1 force=${2:-false}
+    env_load_github_token || die "GitHub token required for upload"
+    local dir="$VSX_RELEASES_DIR/$version" base="vscodium-reh-aix-ppc64-$version"
+    [[ -f "$dir/$base.tar.gz" ]] || die "nothing to upload: $dir/$base.tar.gz missing (build it first)"
+    section "Publishing $version to $VSX_RELEASE_REPO"
+    local highest make_latest notes rid
+    highest=$( { our_release_tags; echo "$version"; } | ver_max)
+    if [[ "$highest" == "$version" ]]; then make_latest=true; else make_latest=false; fi
+    info "make_latest=$make_latest (highest known: $highest)"
+    notes=$(mktemp)
+    release_notes "$version" "$notes"
+    rid=$(release_ensure "$version" "VSCodium AIX Server $version" "$notes" "$make_latest")
+    rm -f "$notes"
+    local f
+    for f in "$dir/$base.tar.gz" "$dir/$base.tar.gz.sha256" "$dir/$base.info" "$dir/$base.json"; do
+        [[ -f "$f" ]] && release_upload_asset "$rid" "$f" "$force"
+    done
+    info "published: https://github.com/$VSX_RELEASE_REPO/releases/tag/$version"
+    notify_success "$version"
+}
+
+cmd_upload() {
+    local version="" force=false
+    while (( $# > 0 )); do
+        case "$1" in
+            --force) force=true ;;
+            -*) die "unknown option: $1" ;;
+            *) version=$1 ;;
+        esac
+        shift
+    done
+    [[ -n "$version" ]] || die "usage: vsx upload VERSION [--force]"
+    start_run_log "upload-$version"
+    upload_version "$version" "$force"
+}
+
+#=============================================================================
+# smoke / module (debugging aids)
+#=============================================================================
+cmd_smoke() {
+    local dir=${1:-}
+    [[ -d "$dir" && -f "$dir/product.json" ]] || die "usage: vsx smoke SERVER_DIR"
+    [[ -x "$dir/node" ]] || die "$dir/node missing or not executable"
+    VSX_NODE_BIN="$dir/node"
+    VSX_NODE_VERSION=$("$VSX_NODE_BIN" -p 'process.versions.node')
+    export VSX_NODE_BIN VSX_NODE_VERSION
+    server_smoke_test "$dir"
+}
+
+cmd_module() {
+    local name=${1:-} version=${2:-}
+    [[ -n "$name" && -n "$version" ]] || die "usage: vsx module NAME VSCODIUM_VERSION"
+    env_require_build_tools
+    env_load_github_token || true
+    start_run_log "module-$name-$version"
+    local work server
+    work=$(work_dir_for "$version"); server="$work/server"
+    mkdir -p "$work"
+    server_fetch "$version"
+    node_runtime_select "$version"
+    module_run "$name" "$server" "$work"
+}
+
+#=============================================================================
+# prune
+#=============================================================================
+# local_release_versions : version-named directories under releases/
+local_release_versions() {
+    local d
+    for d in "$VSX_RELEASES_DIR"/*/; do
+        d=$(basename "$d")
+        [[ "$d" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] && echo "$d"
+    done
+    return 0
+}
+
+cmd_prune() {
+    local dry=false legacy=false
+    while (( $# > 0 )); do
+        case "$1" in
+            --dry-run) dry=true ;;
+            --legacy)  legacy=true ;;
+            *) die "unknown option: $1" ;;
+        esac
+        shift
+    done
+    local rm_cmd=(rm -rf)
+    $dry && rm_cmd=(echo "would remove")
+
+    section "Prune: keep newest $VSX_KEEP_RELEASES in $VSX_RELEASES_DIR"
+    local keep v
+    keep=$(local_release_versions | ver_sort | tail -n "$VSX_KEEP_RELEASES")
+    for v in $(local_release_versions); do
+        grep -qx "$v" <<<"$keep" || "${rm_cmd[@]}" "$VSX_RELEASES_DIR/$v"
+    done
+    # Stray files from older layouts (tarballs directly in releases/).
+    local stray
+    for stray in "$VSX_RELEASES_DIR"/*.tar.gz "$VSX_RELEASES_DIR"/*.backup-* "$VSX_RELEASES_DIR"/*.tar.gz.sha256; do
+        [[ -e "$stray" ]] && "${rm_cmd[@]}" "$stray"
+    done
+
+    section "Prune: work trees and downloads"
+    local d
+    for d in "$VSX_WORK_DIR"/*/; do
+        [[ -d "$d" ]] || continue
+        "${rm_cmd[@]}" "$d"
+    done
+    # Keep upstream tarballs for the versions we still keep locally.
+    for d in "$VSX_DOWNLOADS_DIR"/vscodium-reh-linux-x64-*.tar.gz; do
+        [[ -f "$d" ]] || continue
+        v=$(basename "$d" .tar.gz); v=${v#vscodium-reh-linux-x64-}
+        grep -qx "$v" <<<"$keep" || "${rm_cmd[@]}" "$d"
+    done
+
+    if $legacy; then
+        section "Prune: legacy layout (scripts/vscodium-servers, old build dirs)"
+        for d in "$VSX_HOME/scripts/vscodium-servers" /tmp/vscodium-remote-aix /tmp/vscodium-rebuild-cache; do
+            [[ -e "$d" ]] && "${rm_cmd[@]}" "$d"
+        done
+    fi
+
+    section "Prune: logs (keep $VSX_KEEP_LOGS)"
+    ls -1t "$VSX_LOG_DIR"/*.log 2>/dev/null | tail -n +"$((VSX_KEEP_LOGS + 1))" | while read -r f; do
+        "${rm_cmd[@]}" "$f"
+    done
+    info "prune done"
+}
+
+#=============================================================================
+# cron
+#=============================================================================
+cmd_cron() {
+    start_run_log cron
+    if ! lock_acquire "$VSX_STATE_DIR/lock"; then
+        info "exiting: another run holds the lock"
+        return 0
+    fi
+    local stage="init"
+    _cron_exit() {
+        local rc=$?
+        lock_release
+        if (( rc != 0 )); then
+            _cron_pipeline_error "$stage"
+        fi
+    }
+    trap _cron_exit EXIT
+
+    stage="preflight"
+    env_require_build_tools
+    env_check_gnu_tools
+    env_load_github_token || die "GitHub token missing: $VSX_GITHUB_TOKEN_FILE"
+
+    stage="discover"
+    local upstream_latest published_latest pending
+    upstream_latest=$(upstream_latest_version)
+    published_latest=$(our_release_tags | ver_max)
+    mapfile -t pending < <(pending_versions)
+    info "upstream latest $upstream_latest, published latest ${published_latest:-none}, pending: ${pending[*]:-none}"
+
+    local v rc built=() failed=()
+    if (( ${#pending[@]} == 0 )); then
+        event_record noop "" "no new upstream release"
+    fi
+    for v in "${pending[@]}"; do
+        stage="build:$v"
+        set +e
+        "$VSX_HOME/bin/vsx" __build-one "$v"
+        rc=$?
+        set -e
+        if (( rc == 0 )); then built+=("$v"); else failed+=("$v"); fi
+    done
+
+    stage="prune"
+    cmd_prune || warn "prune reported a problem (non-fatal)"
+
+    stage="digest"
+    if digest_due; then
+        published_latest=$(our_release_tags | ver_max)
+        local still_pending
+        still_pending=$(pending_versions | tr '\n' ' ')
+        digest_send "$upstream_latest" "${published_latest:-none}" "$still_pending" || warn "digest email failed"
+    fi
+
+    section "Cron run complete"
+    info "built: ${built[*]:-none}; failed: ${failed[*]:-none}"
+    # Build failures were already reported individually; the cron run itself
+    # succeeded in doing its job.
+    return 0
+}
+
+# Pipeline-level errors (API down, token missing...) are emailed, but the
+# same error is not repeated more often than every 12h.
+_cron_pipeline_error() {
+    local stage=$1
+    local key="pipeline:$stage:${VSX_FAILED_CMD:-}"
+    local f="$VSX_STATE_DIR/last-pipeline-error"
+    local now prev_key prev_ts
+    now=$(date +%s)
+    if [[ -f "$f" ]]; then
+        prev_key=$(sed -n 1p "$f"); prev_ts=$(sed -n 2p "$f")
+        if [[ "$prev_key" == "$key" ]] && (( now - ${prev_ts:-0} < 12 * 3600 )); then
+            warn "same pipeline error as $(date -d "@$prev_ts" 2>/dev/null || echo earlier); not re-notifying"
+            event_record error "" "stage $stage (suppressed duplicate)"
+            return 0
+        fi
+    fi
+    printf '%s\n%s\n' "$key" "$now" >"$f"
+    notify_failure "" "pipeline stage '$stage' failed" "$VSX_LOG_FILE"
+}
+
+cmd_notify_test() {
+    start_run_log notify-test
+    local body
+    body=$(mktemp)
+    { echo "Test notification from vsx on $(hostname) at $(now_iso)."; _body_footer; } >"$body"
+    send_email "[vsx] test notification" "$body"
+    rm -f "$body"
+}
+
+#=============================================================================
+# dispatch
+#=============================================================================
+main() {
+    local cmd=${1:-help}
+    shift || true
+    case "$cmd" in
+        check)        cmd_check "$@" ;;
+        config)       cmd_config "$@" ;;
+        releases)     cmd_releases "$@" ;;
+        build)        cmd_build "$@" ;;
+        __build-one)  cmd___build_one "$@" ;;
+        upload)       cmd_upload "$@" ;;
+        smoke)        cmd_smoke "$@" ;;
+        module)       cmd_module "$@" ;;
+        prune)        cmd_prune "$@" ;;
+        cron)         cmd_cron "$@" ;;
+        notify-test)  cmd_notify_test "$@" ;;
+        help|-h|--help) usage ;;
+        *) die "unknown command: $cmd (try: vsx help)" ;;
+    esac
+}
+
+main "$@"
