@@ -7,6 +7,10 @@
 #     -fstack-protector-strong. The file is Python-literal syntax, so we edit
 #     it with Python and re-validate it with ast.literal_eval.
 #   * AIX dirent has no d_type; legacy.cc is patched to stat() instead.
+#   * The brute-force backend upstream cannot subscribe() at all (it throws a
+#     C string, which aborts the process). patches/parcel-watcher-polling.patch
+#     adds polling subscriptions behind BRUTE_FORCE_POLLING, which the AIX gyp
+#     block defines. Interval: PARCEL_WATCHER_POLL_INTERVAL_MS (default 2000).
 #   * npm install --ignore-scripts just fetches node-addon-api; node-gyp does
 #     the build against our runtime.
 
@@ -19,6 +23,10 @@ mod_parcel_watcher_build() {
     env_export_compiler_flags
     git_clone_tag "$VSX_REPO_PARCEL_WATCHER" "$version" src
     cd src || return 1
+
+    echo "applying patches/parcel-watcher-polling.patch"
+    patch -p1 --forward --batch <"$VSX_HOME/patches/parcel-watcher-polling.patch"
+    grep -q 'BRUTE_FORCE_POLLING' src/shared/BruteForceBackend.cc || { echo "ERROR: polling patch did not apply" >&2; return 1; }
 
     echo "patching binding.gyp for AIX"
     python3 - binding.gyp <<'PY'
@@ -37,7 +45,7 @@ if 'OS=="aix"' not in text:
             "src/shared/BruteForceBackend.cc",
             "src/unix/legacy.cc"
           ],
-          "defines": [ "WATCHMAN", "BRUTE_FORCE" ],
+          "defines": [ "WATCHMAN", "BRUTE_FORCE", "BRUTE_FORCE_POLLING" ],
           'cflags!': [ '-fstack-protector-strong' ],
           'cflags_cc!': [ '-fstack-protector-strong' ],
           'cflags': [ '-ftls-model=global-dynamic', '-fPIC', '-pthread' ],
@@ -84,4 +92,4 @@ mod_parcel_watcher_install() {
     rm -rf "$server/node_modules/@parcel/watcher/prebuilds" 2>/dev/null || true
 }
 
-mod_parcel_watcher_note() { echo "brute-force backend (no native file events on AIX)"; }
+mod_parcel_watcher_note() { echo "brute-force backend with polling subscriptions (patches/parcel-watcher-polling.patch); interval PARCEL_WATCHER_POLL_INTERVAL_MS"; }

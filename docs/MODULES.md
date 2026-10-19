@@ -77,10 +77,20 @@ Common to all C/C++ addons:
     `S_ISDIR(attrib.st_mode)`; the `fstatat()` filling `attrib` is on the
     previous line upstream.
 * Build: `npm install --ignore-scripts`, `node-gyp rebuild`.
+  * `patches/parcel-watcher-polling.patch`: upstream's brute-force backend
+    has no `subscribe()` (it throws a C string, which escapes Backend.cc's
+    `catch (std::exception&)` and aborts the extension host). Behind
+    `BRUTE_FORCE_POLLING` (defined in our gyp block) the patch adds one
+    polling thread per watcher: rescan with `readTree`, diff with
+    `DirTree::getChanges`, `watcher->notify()`. State lives on
+    `Watcher::state`; the thread never takes `Backend::mMutex`, so
+    `unsubscribe` (called with it held) can join safely. Errors during a
+    rescan go through `mEvents.error()` and polling continues.
 * Install: `node_modules/@parcel/watcher/build/Release/watcher.node`;
   `prebuilds/` is removed so the loader cannot pick a Linux binary.
-* Consequence: file watching polls. Fine for normal projects; large trees
-  are slower to react than on Linux.
+* Consequence: file watching polls (`PARCEL_WATCHER_POLL_INTERVAL_MS`,
+  default 2000 ms, wait stretches to 3x scan time). Fine for normal
+  projects; large trees are slower to react than on Linux.
 
 ## ripgrep
 
@@ -112,6 +122,33 @@ Common to all C/C++ addons:
   win32/darwin/linux/freebsd and `dist/storage.js` picks a path per OS; both
   are `sed`-patched in place to treat `aix` like `linux`. Idempotent.
 * The Windows-only `build/Release/windows.node` is left alone.
+
+## The runtime shim (`templates/aix-platform-override.js`)
+
+Not a module, but it is what makes the modules usable. Preloaded into every
+Node process of the server via `NODE_OPTIONS=--require` (set in
+`bin/aix-env.sh`) and `-r` in the launchers; inert outside VS Code's own
+processes (it checks `process.argv` for `server-main.js`, `server-cli.js`,
+`bootstrap-fork` or a `--type=` child and otherwise removes itself from
+`NODE_OPTIONS`).
+
+* `process.platform` returns `linux` when the call stack contains `ptyHost`,
+  `server-main`, `server-cli` or `deviceid`; `aix` otherwise.
+* `fs.watch` / `fs.promises.watch` are replaced with stat polling
+  (`PollingFSWatcher`): non-recursive directory and file watches, the
+  `FSWatcher` events `change`/`rename`/`error`/`close`, `ref`/`unref`,
+  `AbortSignal`; `{ recursive: true }` throws
+  `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` so VS Code uses @parcel/watcher.
+  Reason: libuv's `fs.watch` on AIX is AHAFS (`/aha`), whose monitor pool is
+  shared machine-wide and, once exhausted or wedged, blocks every process
+  that touches it in an unkillable state (incident 2026-10-19, see
+  `notes/AIX-WATCHERS-AND-BINARIES.md`). `VSCODIUM_AIX_FSWATCH=off` restores
+  native behaviour for debugging; `=force` applies the shim in any process
+  (used by the local test).
+* Tested off-AIX with any Node:
+  `VSCODIUM_AIX_FSWATCH=force node -r templates/aix-platform-override.js <test>`.
+  The smoke test on AIX fails the build if a monitor for its paths appears
+  under `/aha/fs/modDir.monFactory`.
 
 ## Not rebuilt (yet)
 

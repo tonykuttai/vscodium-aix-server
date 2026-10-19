@@ -48,8 +48,10 @@ re-tars it as `vscodium-reh-aix-ppc64-<v>.tar.gz`.
    major upstream targets is bundled as `$ROOT/node`, exactly as upstream
    bundles its Linux node. End users need no Node installation.
 3. **Prove it before publishing.** A build is only packaged after every
-   addon loads under the bundled runtime, ripgrep runs, and the real server
-   starts and logs `Extension host agent listening`.
+   addon loads under the bundled runtime, ripgrep runs, the real server
+   starts, logs `Extension host agent listening`, answers `GET /version`,
+   and has created no AHAFS monitor. The server is run in its own process
+   group and stopped by polling, never by a blocking `wait`.
 4. **Every exit path reports.** Failures email and open a GitHub issue;
    successes close the issue; quiet days still produce one digest. There is
    no path that ends in silence (the original pipeline had three).
@@ -173,6 +175,15 @@ appear between ticks. Oldest-first means `make_latest` ends on the highest.
 broken upstream does not produce an email every four hours, while still
 retrying automatically later and immediately with `--retry`.
 
+**Never touch AHAFS.** AIX's kernel file-event filesystem (`/aha`), which
+libuv uses for `fs.watch`, has a machine-wide monitor pool; when it wedges,
+every process entering it blocks unkillably until root remounts `/aha` or
+reboots (incident 2026-10-19). All file watching in the package is therefore
+polling: `@parcel/watcher` with a polling `subscribe` patch for workspaces,
+and an `fs.watch` shim in the preloaded override for VS Code's own handful of
+non-recursive watches. Slower reaction to external changes is the accepted
+price.
+
 **No `jq`, no `flock`, no `pgrep`.** Not on the Toolbox host. Python 3 is,
 so JSON goes through `jpy`, locks are `mkdir`, processes are `ps | grep`.
 Large JSON never travels through argv (AIX `ARG_MAX` is small).
@@ -182,9 +193,9 @@ Large JSON never travels through argv (AIX `ARG_MAX` is small).
 * `@vscode/sqlite3` and `kerberos` remain Linux binaries in the package. The
   server starts and works without them today (they are loaded lazily); if a
   future VS Code requires sqlite on the server, add a module for it.
-* `@parcel/watcher` uses the brute-force backend (polling), so file watching
-  is slower than on Linux. A native AIX AHAFS backend would be an upstream
-  contribution.
+* All file watching is polling (see "Never touch AHAFS" above), so large
+  workspaces react more slowly than on Linux. An AHAFS backend is not a
+  goal: it is the thing that took the build host down.
 * Only `powerpc-ibm-aix7.3` is tested. Packages likely run on 7.2 TL5 with a
   recent Toolbox GCC runtime, but nothing checks that.
 * The smoke test proves the server starts; it does not open a terminal or

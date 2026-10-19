@@ -12,4 +12,11 @@ esac
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 . "$ROOT/bin/aix-env.sh"
 
-exec "$ROOT/node" ${INSPECT:-} -r "$ROOT/aix-platform-override.js" "$ROOT/out/server-main.js" "$@"
+# The bundled runtime is used unless VSCODIUM_AIX_NODE names another node
+# binary. It must be the same major version (the native addons are compiled
+# against this release's Node ABI).
+NODE_BIN="${VSCODIUM_AIX_NODE:-$ROOT/node}"
+
+# No exec, like upstream: the launcher stays the parent so tools that look
+# for "bin/<app>-server" in the process list still find the server.
+"$NODE_BIN" ${INSPECT:-} -r "$ROOT/aix-platform-override.js" "$ROOT/out/server-main.js" "$@"

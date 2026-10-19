@@ -11,5 +11,6 @@ VERSION="@VERSION@"
 COMMIT="@COMMIT@"
 EXEC_NAME="@APP_NAME@"
 CLI_SCRIPT="$ROOT/out/server-cli.js"
+NODE_BIN="${VSCODIUM_AIX_NODE:-$ROOT/node}"
 
-exec "$ROOT/node" -r "$ROOT/aix-platform-override.js" "$CLI_SCRIPT" "$APP_NAME" "$VERSION" "$COMMIT" "$EXEC_NAME" "$@"
+exec "$NODE_BIN" -r "$ROOT/aix-platform-override.js" "$CLI_SCRIPT" "$APP_NAME" "$VERSION" "$COMMIT" "$EXEC_NAME" "$@"

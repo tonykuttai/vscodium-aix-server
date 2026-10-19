@@ -90,6 +90,17 @@ vsx build X --force     # rebuilds, re-tests, replaces the release assets
 Releases are never deleted by vsx. If you must pull one, do it in the GitHub
 UI; the extension then falls back to the latest remaining release.
 
+### <a name="ahafs"></a>"Servers start but never answer; killed processes stay `<exiting>`; ssh logins hang"
+
+AHAFS (`/aha`, the AIX kernel file-event filesystem) is wedged. Node's native
+`fs.watch` enters it and never returns; the affected processes cannot be
+killed. Diagnose with `truss -f` on a hanging process (last syscalls are
+`mkdir("/aha/fs/modDir.monFactory/...")`) or
+`node -e 'require("fs").watch("/tmp")'` hanging. Only root can clear it:
+`umount /aha && mount /aha`, or a reboot. Packages built since 2026-10-19
+never enter AHAFS (polling shim + polling @parcel/watcher) and the smoke
+test fails a build that does. Full write-up: `notes/AIX-WATCHERS-AND-BINARIES.md`.
+
 ## Routine tasks
 
 | Task | Command |

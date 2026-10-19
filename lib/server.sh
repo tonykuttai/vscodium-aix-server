@@ -220,7 +220,15 @@ server_smoke_test() {
         warn "no ripgrep binary found to test"
     fi
 
-    # 3. the server boots and the extension host comes up
+    # 3. the server boots, the extension host comes up, HTTP answers, and no
+    #    AHAFS monitor was created (the fs.watch shim must keep us out of /aha:
+    #    a wedged AHAFS blocks processes unkillably, see
+    #    notes/AIX-WATCHERS-AND-BINARIES.md).
+    local commit port
+    commit=$(server_commit "$server")
+    # Job control gives the server its own process group, so the extension
+    # host / pty host / file watcher children can be killed with it.
+    set -m
     (
         cd "$server" || exit 1
         exec "./bin/$app" --accept-server-license-terms --host 127.0.0.1 --port 0 \
@@ -228,17 +236,35 @@ server_smoke_test() {
             --extensions-dir "$data/ext" --telemetry-level off
     ) >"$logf" 2>&1 &
     pid=$!
+    set +m
     for ((i = 0; i < VSX_SMOKE_TIMEOUT; i++)); do
         if grep -q 'Extension host agent listening' "$logf" 2>/dev/null; then ok=true; break; fi
         if ! kill -0 "$pid" 2>/dev/null; then break; fi
         sleep 1
     done
-    kill "$pid" 2>/dev/null || true
-    sleep 1
-    kill -9 "$pid" 2>/dev/null || true
-    wait "$pid" 2>/dev/null || true
+    local fail=""
     if ! $ok; then
-        error "server did not reach 'Extension host agent listening' within ${VSX_SMOKE_TIMEOUT}s"
+        fail="server did not reach 'Extension host agent listening' within ${VSX_SMOKE_TIMEOUT}s"
+    else
+        port=$(sed -n 's/.*Extension host agent listening on \([0-9][0-9]*\).*/\1/p' "$logf" | head -1)
+        if [[ -z "$port" ]]; then
+            fail="could not read the listening port from the server log"
+        elif ! curl -fsS -m 15 "http://127.0.0.1:$port/version" 2>/dev/null | grep -q "$commit"; then
+            fail="server is listening on $port but does not answer GET /version with its commit"
+        fi
+        if [[ -z "$fail" && -d /aha/fs/modDir.monFactory ]]; then
+            local mon
+            mon=$(timeout 10 find /aha/fs/modDir.monFactory -name '*vsx-smoke*' 2>/dev/null | head -3 || true)
+            if [[ -n "$mon" ]]; then
+                fail="server created AHAFS monitors (fs.watch shim not active?): $mon"
+            fi
+        fi
+    fi
+    if ! _smoke_stop_group "$pid"; then
+        fail="${fail:+$fail; }server process $pid did not exit after SIGKILL (stuck in the kernel, AHAFS wedged?)"
+    fi
+    if [[ -n "$fail" ]]; then
+        error "$fail"
         error "server log:"
         tail -60 "$logf" >&2 || true
         rm -rf "$data"
@@ -248,7 +274,7 @@ server_smoke_test() {
         warn "server log contains error lines (review):"
         grep -iE 'error|cannot find module|not supported' "$logf" | head -10 >&2 || true
     fi
-    info "smoke test passed (extension host listening)"
+    info "smoke test passed (extension host listening, /version answered, no AHAFS use)"
 
     # 4. remote CLI responds
     local cli
@@ -257,6 +283,26 @@ server_smoke_test() {
         warn "remote-cli --version failed (non-fatal)"
     fi
     rm -rf "$data"
+}
+
+# _smoke_stop_group PID : TERM then KILL the process group of PID (and PID
+# itself), polling instead of calling `wait` on a process that may be stuck
+# in the kernel. Returns 1 if PID is still alive afterwards.
+_smoke_stop_group() {
+    local pid=$1 sig i st
+    for sig in TERM KILL; do
+        kill "-$sig" -- "-$pid" 2>/dev/null || kill "-$sig" "$pid" 2>/dev/null || true
+        for ((i = 0; i < 10; i++)); do
+            st=$(ps -o stat= -p "$pid" 2>/dev/null | tr -d ' ')
+            # gone, or a zombie waiting for us: reap and done
+            if [[ -z "$st" || "$st" == Z* ]]; then
+                wait "$pid" 2>/dev/null || true
+                return 0
+            fi
+            sleep 1
+        done
+    done
+    return 1
 }
 
 #-----------------------------------------------------------------------------
@@ -349,7 +395,7 @@ tar -xzf $base.tar.gz -C ~/.vscodium-server/bin/$commit --strip-components 1
 The [open-remote-ssh AIX extension](https://github.com/tonykuttai/open-remote-ssh) does this automatically.
 
 ### Requirements on the AIX machine
-* AIX 7.3 on POWER (ppc64). No Node.js installation is needed: the matching Node runtime is bundled.
+* AIX 7.3 on POWER (ppc64). No Node.js installation is needed: the matching Node runtime is bundled (set \`VSCODIUM_AIX_NODE\` to use your own binary of the same major instead).
 * The GCC runtime from the AIX Toolbox (\`libstdc++\`, \`libgcc\`), normally present under \`/opt/freeware/lib\`.
 * GNU tar from the Toolbox is recommended for extracting.
 

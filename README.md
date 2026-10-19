@@ -46,7 +46,8 @@ platform-specific piece replaced by an AIX build:
 | `@parcel/watcher` (file watching) | Built from the upstream tag with an AIX backend (brute-force polling) |
 | ripgrep (search) | Built from the exact ripgrep tag upstream's `@vscode/ripgrep-universal` pins, with PCRE2 |
 | `@vscode/deviceid` | Patched to accept `aix` |
-| Launchers | `bin/codium-server`, `bin/remote-cli/codium` and `bin/aix-env.sh` set `LIBPATH` and preload a `process.platform` shim so VS Code takes its Linux code paths |
+| Launchers | `bin/codium-server`, `bin/remote-cli/codium` and `bin/aix-env.sh` set `LIBPATH` and preload `aix-platform-override.js` into every server process |
+| `aix-platform-override.js` | Makes VS Code take its Linux code paths (`process.platform`) and replaces `fs.watch` with stat polling so the server never touches AHAFS, the AIX kernel file-event system, which can wedge a whole machine (see [docs/OPERATIONS.md](docs/OPERATIONS.md#ahafs)) |
 
 Every release page carries a table of exactly which versions went in
 (generated from `aix-build-manifest.json`, which is also inside the tarball),
@@ -120,6 +121,15 @@ single top-level directory). To run the server by hand:
   launching.
 * Terminal does not open: `node_modules/node-pty/lib/native-libs/libutil.so.2`
   must be present; `bin/aix-env.sh` adds it to `LIBPATH`.
+* Server starts, logs `Extension host agent started`, then never answers,
+  and killed servers linger as `<exiting>`: AHAFS is wedged on that machine.
+  Only root can clear it (`umount /aha && mount /aha`, or a reboot). Packages
+  from 2026-10-19 on avoid AHAFS entirely; check that `bin/aix-env.sh` sets
+  `NODE_OPTIONS` to preload `aix-platform-override.js` and that
+  `VSCODIUM_AIX_FSWATCH` is not set to `off`.
+* Policy forbids the bundled runtime: set `VSCODIUM_AIX_NODE=/path/to/node`
+  (same major version as the bundled one, see the release notes) in the
+  environment the server is launched from; the launchers use it instead.
 * Anything else: run `bin/codium-server --version`, then start it in the
   foreground as above and read the output. Open an issue with that output,
   `oslevel -s`, and the release version.
@@ -373,8 +383,14 @@ releases/                local packaged artifacts (git-ignored)
 * `@vscode/sqlite3` and `kerberos` are not rebuilt and remain Linux
   binaries inside the package. The server starts and is usable without them;
   features that need them (Kerberos proxy auth) do not work on AIX.
-* File watching uses polling (`@parcel/watcher` brute-force backend), so
-  large workspaces update more slowly than on Linux.
+* File watching is polling based, by design: AIX's native mechanism (AHAFS,
+  used by Node's `fs.watch`) has a shared, finite monitor pool and can wedge
+  every process on the machine. Workspace watching goes through
+  `@parcel/watcher` with a polling patch (`PARCEL_WATCHER_POLL_INTERVAL_MS`,
+  default 2000 ms, stretched automatically for big trees); the few
+  non-recursive watches VS Code makes itself go through a polling `fs.watch`
+  shim (`VSCODIUM_AIX_FSWATCH_INTERVAL_MS`, default 1000 ms). Changes made
+  outside the editor therefore show up after a second or two.
 * Only ppc64 AIX 7.3 is built and tested.
 * The smoke test proves the server boots; it does not exercise terminals or
   search. Please report regressions as issues.

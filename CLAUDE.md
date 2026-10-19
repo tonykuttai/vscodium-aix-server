@@ -40,6 +40,9 @@ Testing changes on AIX: use a second checkout (`~/utility/vsx-dev`) with `VSX_CO
 
 ## Rules that are easy to get wrong
 
+- **Never let the server touch AHAFS** (`/aha`, what libuv's `fs.watch` uses on AIX): a wedged AHAFS blocks processes unkillably machine-wide (incident 2026-10-19, `notes/AIX-WATCHERS-AND-BINARIES.md`). All watching is polling: `patches/parcel-watcher-polling.patch` for workspaces, the `fs.watch` shim in `templates/aix-platform-override.js` for VS Code's own watches (preloaded everywhere via `NODE_OPTIONS` in `aix-env.sh`, inert outside VS Code processes). Test the shim locally: `VSCODIUM_AIX_FSWATCH=force node -r templates/aix-platform-override.js <script>`. The smoke test fails if a `/aha/fs/modDir.monFactory/*vsx-smoke*` monitor appears.
+- **Smoke test process handling**: the server runs in its own process group (`set -m`), is stopped by `_smoke_stop_group` (TERM, KILL, poll `ps -o stat=`), and `wait` is only called once the process is gone or a zombie. A process that survives SIGKILL is stuck in the kernel; the test reports it and fails rather than blocking.
+
 - **Bash errexit is off inside anything tested by `if`/`!`/`||`, including subshells and functions.** That is why versions are built in a child process (`vsx __build-one`) and module build/install run as `set +e; ( set -e; ... ); rc=$?; set -e`. Keep that pattern; do not "simplify" it to `if ! fn; then`.
 - **Never pass large data through argv** (AIX `ARG_MAX` is small): JSON goes via stdin/temp files (`gh_paginate`, `json_escape`).
 - **AIX userland**: no `jq`, `flock`, `pgrep`, `find -delete/-mmin/-maxdepth/-print0`, `xargs -0/-r`. `/opt/freeware/bin` must be first in PATH (GNU grep/sed/tar/sort are checked). `product.json` has several nested `version` keys: use `json_field`, never grep-the-first-match.

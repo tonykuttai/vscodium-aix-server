@@ -25,6 +25,15 @@ _vsx_libpath="$ROOT/@PTY_LIBDIR@:/opt/freeware/lib/pthread/ppc64:/opt/freeware/l
 LIBPATH="$_vsx_libpath${LIBPATH:+:$LIBPATH}"
 export LIBPATH
 
+# Preload the AIX shim (process.platform + fs.watch without AHAFS) into every
+# Node process the server spawns (extension host, pty host, file watcher).
+# The shim is inert in processes that are not VS Code's and removes itself
+# from NODE_OPTIONS there, so user programs in terminals are unaffected.
+case " ${NODE_OPTIONS:-} " in
+    *aix-platform-override.js*) ;;
+    *) NODE_OPTIONS="--require $ROOT/aix-platform-override.js${NODE_OPTIONS:+ $NODE_OPTIONS}"; export NODE_OPTIONS ;;
+esac
+
 # GNU userland first: the server shells out to tar/find/ps etc.
 case ":$PATH:" in
     *:/opt/freeware/bin:*) ;;
