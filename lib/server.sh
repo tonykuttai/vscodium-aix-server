@@ -162,7 +162,7 @@ server_install_launchers() {
     commit=$(server_commit "$server")
     version=$(server_version "$server")
 
-    cp "$VSX_HOME/templates/aix-platform-override.js" "$server/aix-platform-override.js"
+    cp "$VSX_HOME/templates/aix-platform-override.cjs" "$server/aix-platform-override.cjs"
     _render_template "$VSX_HOME/templates/aix-env.sh" "$server/bin/aix-env.sh" \
         "PTY_LIBDIR=node_modules/node-pty/lib/native-libs"
     _render_template "$VSX_HOME/templates/server-launcher.sh" "$server/bin/$app-server"
@@ -226,6 +226,25 @@ server_smoke_test() {
     #    notes/AIX-WATCHERS-AND-BINARIES.md).
     local commit port
     commit=$(server_commit "$server")
+
+    # Guard: never start a server whose fs.watch is still native (that is the
+    # AHAFS entry point). Check with the exact argv shape the launcher uses,
+    # so the shim's process gating is exercised too.
+    printf '%s\n' 'process.stdout.write(String(require("fs").watch).includes("PollingFSWatcher") ? "shimmed" : "native");' >"$data/server-main.js"
+    local shimmed
+    shimmed=$(
+        set +eu
+        export ROOT="$server"
+        # shellcheck disable=SC1091
+        . "$server/bin/aix-env.sh" 2>/dev/null
+        "$server/node" -r "$server/aix-platform-override.cjs" "$data/server-main.js" 2>/dev/null
+    ) || true
+    if [[ "$shimmed" != "shimmed" ]]; then
+        rm -rf "$data"
+        die "refusing to start the server: fs.watch is not shimmed (got '${shimmed:-no output}'); it would use AHAFS"
+    fi
+    info "fs.watch shim active in server processes"
+
     # Job control gives the server its own process group, so the extension
     # host / pty host / file watcher children can be killed with it.
     set -m

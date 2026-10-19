@@ -11,6 +11,8 @@
 #   vsx upload VERSION [--force]      publish an already packaged version
 #   vsx smoke SERVER_DIR              start-up test of an extracted server
 #   vsx module NAME VSCODIUM_VERSION  build one module against that server
+#   vsx cache export|import FILE      move built modules + Node runtimes
+#                                     between hosts (no Rust needed to import)
 #   vsx prune [--dry-run] [--legacy]  apply retention to local artifacts
 #   vsx cron                          what the cron job runs (lock, missing,
 #                                     prune, digest, log rotation)
@@ -79,11 +81,33 @@ cmd_check() {
     if [[ "$(uname -s)" != "AIX" ]]; then
         echo "NOTE: not an AIX host; only lint and read-only commands work here."
     else
-        env_check_gnu_tools && echo "GNU grep/sed/tar/sort: ok" || rc=1
-        require_cmd git gcc g++ gmake python3 curl tar file sha256sum patch strip 2>/dev/null \
-            && echo "build tools: ok" || rc=1
-        have cargo && have rustc && echo "rust: ok" || { echo "rust: MISSING (ripgrep cannot be built)"; rc=1; }
+        local missing_pkgs=()
+        env_check_gnu_tools && echo "GNU grep/sed/tar/sort: ok" || { rc=1; missing_pkgs+=(coreutils grep sed tar); }
+        local t
+        for t in git gcc g++ gmake python3 curl wget tar file sha256sum patch strip; do
+            if ! have "$t"; then
+                rc=1
+                case "$t" in
+                    g++) missing_pkgs+=(gcc-c++) ;; gmake) missing_pkgs+=(make) ;;
+                    sha256sum) missing_pkgs+=(coreutils) ;; strip) echo "strip: MISSING (base AIX bos.adt)" ;;
+                    *) missing_pkgs+=("$t") ;;
+                esac
+                echo "$t: MISSING"
+            fi
+        done
+        (( ${#missing_pkgs[@]} == 0 )) && echo "build tools: ok"
+        if have cargo && have rustc; then
+            echo "rust: ok"
+        else
+            echo "rust: missing. ripgrep can only be built with Rust; without it, import a build from another host (vsx cache import)."
+            missing_pkgs+=(rust cargo)
+        fi
         have mailx || have mail || have sendmail || echo "mail: no mailx/mail/sendmail; email notifications will fail"
+        if (( ${#missing_pkgs[@]} > 0 )); then
+            echo
+            echo "To install the missing AIX Toolbox packages (needs root):"
+            echo "  dnf install $(printf '%s\n' "${missing_pkgs[@]}" | sort -u | tr '\n' ' ')"
+        fi
     fi
     env_load_github_token || { echo "GitHub token: MISSING ($VSX_GITHUB_TOKEN_FILE or GITHUB_TOKEN)"; rc=1; }
     [[ -n "$VSX_EMAIL_TO" ]] || echo "VSX_EMAIL_TO not set: no emails will be sent"
@@ -170,7 +194,11 @@ cmd_build() {
     parse_build_opts "$@"
     env_require_build_tools
     env_check_gnu_tools
-    env_load_github_token || die "GitHub token required (set GITHUB_TOKEN or $VSX_GITHUB_TOKEN_FILE)"
+    if ! env_load_github_token; then
+        # Downloads work unauthenticated (rate limited); only publishing needs a token.
+        $BUILD_NO_UPLOAD || die "GitHub token required to publish (set GITHUB_TOKEN or $VSX_GITHUB_TOKEN_FILE), or use --no-upload"
+        warn "no GitHub token: using unauthenticated API (60 requests/hour)"
+    fi
     start_run_log build
 
     local -a versions=()
@@ -350,6 +378,62 @@ cmd_module() {
 }
 
 #=============================================================================
+# cache export / import : move built artifacts between hosts
+#=============================================================================
+# Carries module build results (not their sources) and the Node runtime
+# tarballs, so a second host can package without a Rust toolchain or a slow
+# first compile. Artifacts are AIX 7.3 / GCC runtime neutral within the same
+# oslevel generation; the smoke test still validates them on the importing
+# host.
+cmd_cache() {
+    local action=${1:-} file=${2:-}
+    case "$action" in
+        export)
+            [[ -n "$file" ]] || die "usage: vsx cache export FILE.tar.gz"
+            local tmp
+            tmp=$(mktemp -d)
+            mkdir -p "$tmp/modules" "$tmp/downloads"
+            local m k
+            for m in "$VSX_MODULE_CACHE_DIR"/*/; do
+                [[ -d "$m" ]] || continue
+                for k in "$m"*/; do
+                    [[ -f "$k/.build-complete" ]] || continue
+                    mkdir -p "$tmp/modules/$(basename "$m")/$(basename "$k")"
+                    # everything except the source/build tree
+                    ( cd "$k" && tar -cf - --exclude=./src . ) | ( cd "$tmp/modules/$(basename "$m")/$(basename "$k")" && tar -xf - )
+                done
+            done
+            cp "$VSX_DOWNLOADS_DIR"/node-v*-aix-ppc64.tar.gz "$VSX_DOWNLOADS_DIR"/node-v*.SHASUMS256.txt "$tmp/downloads/" 2>/dev/null || true
+            cat >"$tmp/MANIFEST" <<EOF
+vsx cache export
+host: $(hostname) $(uname -s) $VSX_OS_LEVEL
+gcc: $VSX_GCC_VERSION  rustc: ${VSX_RUSTC_VERSION:-none}
+date: $(now_iso)
+EOF
+            tar -C "$tmp" -czf "$file" .
+            rm -rf "$tmp"
+            info "exported to $file ($(human_size "$(file_size "$file")")):"
+            tar -tzf "$file" | grep -E 'build-complete|node-v' | sed 's/^/  /'
+            ;;
+        import)
+            [[ -f "$file" ]] || die "usage: vsx cache import FILE.tar.gz"
+            local tmp
+            tmp=$(mktemp -d)
+            tar -C "$tmp" -xzf "$file"
+            [[ -f "$tmp/MANIFEST" ]] || { rm -rf "$tmp"; die "not a vsx cache export: $file"; }
+            info "importing cache made on: $(sed -n 2p "$tmp/MANIFEST")"
+            mkdir -p "$VSX_MODULE_CACHE_DIR" "$VSX_DOWNLOADS_DIR"
+            [[ -d "$tmp/modules" ]] && cp -r "$tmp/modules/." "$VSX_MODULE_CACHE_DIR/"
+            [[ -d "$tmp/downloads" ]] && cp "$tmp/downloads/"* "$VSX_DOWNLOADS_DIR/" 2>/dev/null
+            rm -rf "$tmp"
+            info "imported into $VSX_CACHE_DIR; modules now cached:"
+            find "$VSX_MODULE_CACHE_DIR" -name .build-complete | sed "s|$VSX_MODULE_CACHE_DIR/||; s|/.build-complete||; s/^/  /"
+            ;;
+        *) die "usage: vsx cache export|import FILE.tar.gz" ;;
+    esac
+}
+
+#=============================================================================
 # prune
 #=============================================================================
 # local_release_versions : version-named directories under releases/
@@ -521,6 +605,7 @@ main() {
         smoke)        cmd_smoke "$@" ;;
         module)       cmd_module "$@" ;;
         prune)        cmd_prune "$@" ;;
+        cache)        cmd_cache "$@" ;;
         cron)         cmd_cron "$@" ;;
         notify-test)  cmd_notify_test "$@" ;;
         help|-h|--help) usage ;;

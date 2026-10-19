@@ -54,7 +54,9 @@ Common to all C/C++ addons:
     `bin/aix-env.sh` puts that directory on `LIBPATH`.
 * Build: by hand with `g++` (compile + link), not node-gyp. **Do not add
   portlibforaix's `include/` to the include path**: it contains a `stdio.h`
-  that shadows the system header and breaks `<cstdio>`.
+  that shadows the system header and breaks `<cstdio>`. The patch also must
+  not `#include <pty.h>`: AIX has none, and a stray one under
+  `/opt/freeware/include` on one host hid that until a second host failed.
 * Verified with `LIBPATH` pointing at `lib/native-libs`.
 * The JS side (`lib/unixTerminal.js`) calls `pty.fork()` with a signature
   that changed over time; building the same tag the server bundles keeps
@@ -123,9 +125,12 @@ Common to all C/C++ addons:
   are `sed`-patched in place to treat `aix` like `linux`. Idempotent.
 * The Windows-only `build/Release/windows.node` is left alone.
 
-## The runtime shim (`templates/aix-platform-override.js`)
+## The runtime shim (`templates/aix-platform-override.cjs`)
 
-Not a module, but it is what makes the modules usable. Preloaded into every
+Not a module, but it is what makes the modules usable. It is a `.cjs` file on
+purpose: the server's `package.json` declares `"type": "module"`, so a `.js`
+file in the server root is loaded as an ES module and `require` is undefined
+(the smoke-test guard caught exactly that on wyvernden). Preloaded into every
 Node process of the server via `NODE_OPTIONS=--require` (set in
 `bin/aix-env.sh`) and `-r` in the launchers; inert outside VS Code's own
 processes (it checks `process.argv` for `server-main.js`, `server-cli.js`,
@@ -146,7 +151,7 @@ processes (it checks `process.argv` for `server-main.js`, `server-cli.js`,
   native behaviour for debugging; `=force` applies the shim in any process
   (used by the local test).
 * Tested off-AIX with any Node:
-  `VSCODIUM_AIX_FSWATCH=force node -r templates/aix-platform-override.js <test>`.
+  `VSCODIUM_AIX_FSWATCH=force node -r templates/aix-platform-override.cjs <test>`.
   The smoke test on AIX fails the build if a monitor for its paths appears
   under `/aha/fs/modDir.monFactory`.
 

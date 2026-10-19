@@ -114,6 +114,30 @@ test fails a build that does. Full write-up: `notes/AIX-WATCHERS-AND-BINARIES.md
 | Rotate the token | replace `~/.config/github/token`; `vsx check` |
 | Change email | edit `VSX_EMAIL_TO` in `~/.config/vsx/vsx.conf` |
 
+## Bringing up a second build host
+
+Checklist, in order (each step tells you what is wrong if it fails):
+
+1. `bin/vsx check` on the new host. It prints the exact `dnf install` line
+   for anything missing. Rust is the only package that is often absent.
+2. If Rust is missing or you want to skip the first compile: on an existing
+   host `bin/vsx cache export /tmp/vsx-cache.tar.gz`, copy it over, and
+   `bin/vsx cache import /tmp/vsx-cache.tar.gz`. ripgrep then comes from the
+   import; everything else is recompiled or reused as cached.
+3. `bin/vsx build --latest --no-upload --keep-work`. No token needed.
+4. `bin/vsx smoke ~/.cache/vsx/work/<v>/server` if you want to re-run only
+   the start-up test; it refuses to start a server whose `fs.watch` is not
+   shimmed, so it is safe on a shared machine.
+5. Only then: token, `~/.config/vsx/vsx.conf`, `vsx upload`, crontab. Make
+   sure the old host's cron job is removed first; two hosts publishing the
+   same repository would race.
+
+Pitfalls met on 2026-10-19 while doing exactly this on wyvernden: a stray
+`pty.h` under `/opt/freeware/include` on the first host had hidden a missing
+include in the node-pty patch; the shim had to be a `.cjs` file because the
+server tree is `"type": "module"`; hostnames in `~/.ssh/config` differed
+between domains. All three are fixed or documented in the code now.
+
 ## Testing changes to vsx itself
 
 Never test in the checkout cron uses. Use a second checkout with its own

@@ -30,8 +30,8 @@ export LIBPATH
 # The shim is inert in processes that are not VS Code's and removes itself
 # from NODE_OPTIONS there, so user programs in terminals are unaffected.
 case " ${NODE_OPTIONS:-} " in
-    *aix-platform-override.js*) ;;
-    *) NODE_OPTIONS="--require $ROOT/aix-platform-override.js${NODE_OPTIONS:+ $NODE_OPTIONS}"; export NODE_OPTIONS ;;
+    *aix-platform-override.cjs*) ;;
+    *) NODE_OPTIONS="--require $ROOT/aix-platform-override.cjs${NODE_OPTIONS:+ $NODE_OPTIONS}"; export NODE_OPTIONS ;;
 esac
 
 # GNU userland first: the server shells out to tar/find/ps etc.

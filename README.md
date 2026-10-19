@@ -46,8 +46,8 @@ platform-specific piece replaced by an AIX build:
 | `@parcel/watcher` (file watching) | Built from the upstream tag with an AIX backend (brute-force polling) |
 | ripgrep (search) | Built from the exact ripgrep tag upstream's `@vscode/ripgrep-universal` pins, with PCRE2 |
 | `@vscode/deviceid` | Patched to accept `aix` |
-| Launchers | `bin/codium-server`, `bin/remote-cli/codium` and `bin/aix-env.sh` set `LIBPATH` and preload `aix-platform-override.js` into every server process |
-| `aix-platform-override.js` | Makes VS Code take its Linux code paths (`process.platform`) and replaces `fs.watch` with stat polling so the server never touches AHAFS, the AIX kernel file-event system, which can wedge a whole machine (see [docs/OPERATIONS.md](docs/OPERATIONS.md#ahafs)) |
+| Launchers | `bin/codium-server`, `bin/remote-cli/codium` and `bin/aix-env.sh` set `LIBPATH` and preload `aix-platform-override.cjs` into every server process |
+| `aix-platform-override.cjs` | Makes VS Code take its Linux code paths (`process.platform`) and replaces `fs.watch` with stat polling so the server never touches AHAFS, the AIX kernel file-event system, which can wedge a whole machine (see [docs/OPERATIONS.md](docs/OPERATIONS.md#ahafs)) |
 
 Every release page carries a table of exactly which versions went in
 (generated from `aix-build-manifest.json`, which is also inside the tarball),
@@ -125,7 +125,7 @@ single top-level directory). To run the server by hand:
   and killed servers linger as `<exiting>`: AHAFS is wedged on that machine.
   Only root can clear it (`umount /aha && mount /aha`, or a reboot). Packages
   from 2026-10-19 on avoid AHAFS entirely; check that `bin/aix-env.sh` sets
-  `NODE_OPTIONS` to preload `aix-platform-override.js` and that
+  `NODE_OPTIONS` to preload `aix-platform-override.cjs` and that
   `VSCODIUM_AIX_FSWATCH` is not set to `off`.
 * Policy forbids the bundled runtime: set `VSCODIUM_AIX_NODE=/path/to/node`
   (same major version as the bundled one, see the release notes) in the
@@ -223,13 +223,36 @@ crontab -e
 Each run writes `~/.local/state/vsx/logs/<timestamp>-cron.log`; the wrapper's
 own output (normally empty) goes to `logs/cron-wrapper.log`.
 
-### 4.5 Moving to another machine
+### 4.5 Moving to, or adding, another machine
 
-Repeat 4.1 to 4.4 on the new host. Nothing of value lives only on the old
-host: releases are on GitHub, the state directory only holds attempt
-counters and logs. If you want to keep the build caches (saves the first
-compile), copy `~/.cache/vsx/modules` and `~/.cache/vsx/node`. Make sure
-only one host runs the cron job.
+Nothing of value lives only on a build host: releases are on GitHub, the
+state directory only holds attempt counters and logs. On the new host:
+
+```sh
+bin/vsx check                     # tells you exactly which Toolbox packages to dnf install
+# optional but recommended: bring the built modules and Node runtimes along
+#   old host:  bin/vsx cache export /tmp/vsx-cache.tar.gz     (~80 MB)
+#   new host:  bin/vsx cache import /tmp/vsx-cache.tar.gz
+bin/vsx build --latest --no-upload --keep-work
+```
+
+Things learned bringing up the second host (wyvernden, 2026-10-19):
+
+* **Rust is the only hard-to-get prerequisite.** Everything else is in a
+  default Toolbox install. Without Rust, ripgrep cannot be compiled, but an
+  imported cache is used automatically and the build proceeds.
+* **A GitHub token is only needed to publish.** `--no-upload` builds work
+  without one (the unauthenticated API allows 60 requests per hour).
+* **Node.js is not needed on the host at all**; the first build downloads the
+  official AIX runtime (75 MB) into `~/.cache/vsx/node`.
+* **portlibforaix** (for node-pty) is cloned and built automatically into
+  `~/local/portlibforaix` on first use.
+* **Do not trust headers under `/opt/freeware/include`** to be present on
+  every host; the node-pty patch used to rely on a stray `pty.h` there.
+* The first full build takes 10 to 20 minutes on a quiet machine, longer on
+  a shared one; later builds reuse the module cache and take about a minute.
+* Use a separate checkout, state directory and cache for experiments (see
+  Contributing); make sure only one host runs the cron job.
 
 ---
 
@@ -250,6 +273,7 @@ notifications and exits 0 so cron stays quiet).
 | `vsx upload VERSION [--force]` | Publish an already packaged version from `releases/VERSION/`. Creates or updates the release, skips assets that exist (`--force` replaces them), sets "latest" only if it is the highest version. |
 | `vsx smoke SERVER_DIR` | Run the start-up test against any extracted server directory. |
 | `vsx module NAME VSCODIUM_VERSION` | Build and install one module (`native-watchdog`, `node-spdlog`, `node-pty`, `parcel-watcher`, `ripgrep`, `deviceid`) into that version's work tree. For debugging a single component. |
+| `vsx cache export FILE` / `vsx cache import FILE` | Move built module artifacts and Node runtime tarballs between hosts (about 80 MB). Lets a host without Rust package releases, and skips the first compile on a new machine. |
 | `vsx prune [--dry-run] [--legacy]` | Apply retention: keep the newest `VSX_KEEP_RELEASES` local packages and downloads, remove work trees, keep `VSX_KEEP_LOGS` logs. `--legacy` also removes the pre-2026 `scripts/vscodium-servers` tree and `/tmp` build dirs. |
 | `vsx cron` | One automation tick: lock, discover, build everything pending, prune, send the daily digest if due. |
 | `vsx notify-test` | Send a test email to `VSX_EMAIL_TO`. |

@@ -44,11 +44,32 @@ mod_ripgrep_wanted() {
     printf '%s\n' "$tag"
 }
 
-mod_ripgrep_cache_key() { printf '%s-rustc%s\n' "$1" "$VSX_RUSTC_VERSION"; }
+mod_ripgrep_cache_key() {
+    local tag=$1 d
+    if [[ -n "$VSX_RUSTC_VERSION" ]]; then
+        printf '%s-rustc%s\n' "$tag" "$VSX_RUSTC_VERSION"
+        return 0
+    fi
+    # No Rust on this host: reuse a build imported from another host
+    # (`vsx cache import`), whatever rustc produced it.
+    for d in "$VSX_MODULE_CACHE_DIR/ripgrep/$tag-rustc"*/; do
+        if [[ -f "$d/.build-complete" && -f "$d/rg" ]]; then
+            warn "ripgrep: no Rust toolchain here; reusing imported build $(basename "$d")"
+            basename "$d"
+            return 0
+        fi
+    done
+    printf '%s-rustc-missing\n' "$tag"
+}
 
 mod_ripgrep_build() {
     local tag=$1 out=$2
-    env_require_rust
+    if ! have cargo || ! have rustc; then
+        echo "ERROR: ripgrep $tag needs a Rust toolchain and this host has none." >&2
+        echo "       Either install the AIX Toolbox 'rust' and 'cargo' RPMs (dnf install rust cargo)," >&2
+        echo "       or copy a build from a host that has it: there 'vsx cache export FILE', here 'vsx cache import FILE'." >&2
+        return 1
+    fi
     export CC=gcc CXX=g++
     git_clone_tag "$VSX_REPO_RIPGREP" "$tag" src
     cd src || return 1

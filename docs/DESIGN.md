@@ -113,7 +113,7 @@ re-tars it as `vscodium-reh-aix-ppc64-<v>.tar.gz`.
    records it in `manifest.json`.
 4. **node + launchers**: replace the ELF `node` with the stripped AIX one;
    render `bin/<app>-server`, `bin/remote-cli/<app>`, `bin/aix-env.sh` and
-   `aix-platform-override.js` from `templates/`.
+   `aix-platform-override.cjs` from `templates/`.
 5. **smoke**: required addons present + XCOFF + load; ripgrep runs; server
    boots to "Extension host agent listening" within `VSX_SMOKE_TIMEOUT`.
 6. **package**: tar with the commit id as the single top-level directory

@@ -1,4 +1,6 @@
-// AIX runtime shim for the VSCodium server. Preloaded into every Node process
+// AIX runtime shim for the VSCodium server. Must stay a .cjs file: the server's
+// package.json says "type": "module", so a .js here would be loaded as ESM and
+// `require` would not exist. Preloaded into every Node process
 // of the server (main server, extension host, pty host, file watcher, remote
 // CLI) through NODE_OPTIONS=--require set in bin/aix-env.sh, and also with
 // `-r` by the launchers.
@@ -42,7 +44,7 @@ function installShim() {
     const mode = (process.env.VSCODIUM_AIX_FSWATCH || '').toLowerCase();
     const script = process.argv[1] || '';
     const isVsCodeProcess =
-        /server-main\.js$|server-cli\.js$|bootstrap-fork(\.js)?$/.test(script) ||
+        /server-main\.[cm]?js$|server-cli\.[cm]?js$|bootstrap-fork(\.[cm]?js)?$/.test(script) ||
         process.argv.some(a => /^--type=(extensionHost|ptyHost|fileWatcher|utilityProcess|shared-process)/.test(a));
 
     if (!isVsCodeProcess && mode !== 'force') {
@@ -273,8 +275,8 @@ function installShim() {
 
     function stripSelfFromNodeOptions() {
         const opts = process.env.NODE_OPTIONS;
-        if (!opts || !opts.includes('aix-platform-override.js')) { return; }
-        const cleaned = opts.replace(/(^|\s)(--require|-r)(=|\s+)"?[^"\s]*aix-platform-override\.js"?/g, ' ').trim();
+        if (!opts || !opts.includes('aix-platform-override.cjs')) { return; }
+        const cleaned = opts.replace(/(^|\s)(--require|-r)(=|\s+)"?[^"\s]*aix-platform-override\.cjs"?/g, ' ').trim();
         if (cleaned) { process.env.NODE_OPTIONS = cleaned; } else { delete process.env.NODE_OPTIONS; }
     }
 }
