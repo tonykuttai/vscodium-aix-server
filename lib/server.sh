@@ -318,13 +318,18 @@ EOF
 }
 
 # release_notes VERSION OUTFILE : markdown body for the GitHub release.
+# Reads the manifest that was packaged next to the tarball, so notes can be
+# (re)generated long after the work tree is gone.
 release_notes() {
     local version=$1 out=$2
-    local work commit base
-    work=$(work_dir_for "$version")
-    commit=$(manifest_get "$work" commit)
-    [[ -n "$commit" ]] || commit=$(grep '^Commit:' "$VSX_RELEASES_DIR/$version/vscodium-reh-aix-ppc64-$version.info" | cut -d' ' -f2)
+    local base manifest commit
     base="vscodium-reh-aix-ppc64-$version"
+    manifest="$VSX_RELEASES_DIR/$version/$base.json"
+    [[ -f "$manifest" ]] || manifest="$(work_dir_for "$version")/manifest.json"
+    commit=""
+    [[ -f "$manifest" ]] && commit=$(jpy 'd.get("commit","")' <"$manifest")
+    [[ -n "$commit" ]] || commit=$(grep '^Commit:' "$VSX_RELEASES_DIR/$version/$base.info" | cut -d' ' -f2)
+    [[ -n "$commit" ]] || die "cannot determine commit for $version (no manifest or .info)"
     local sum
     sum=$(cut -d' ' -f1 "$VSX_RELEASES_DIR/$version/$base.tar.gz.sha256")
     cat >"$out" <<EOF
@@ -349,16 +354,17 @@ The [open-remote-ssh AIX extension](https://github.com/tonykuttai/open-remote-ss
 * GNU tar from the Toolbox is recommended for extracting.
 
 ### Contents
-$(manifest_render_table "$work")
+$(manifest_render_table "$manifest")
 
 SHA256: \`$sum\`
 EOF
 }
 
+# manifest_render_table MANIFEST_FILE : markdown table of what went in.
 manifest_render_table() {
-    local work=$1
-    [[ -f "$work/manifest.json" ]] || { echo "(no manifest)"; return 0; }
-    python3 - "$work/manifest.json" <<'PY'
+    local file=$1
+    [[ -f "$file" ]] || { echo "(no manifest)"; return 0; }
+    python3 - "$file" <<'PY'
 import json, sys
 d = json.load(open(sys.argv[1]))
 print("| component | version | note |")
