@@ -181,6 +181,18 @@ release_upload_asset() {
     return 0
 }
 
+# release_published_aix_build TAG : the aix_build counter recorded in the
+# published <base>.json asset for TAG; 0 if there is no release or no asset,
+# 1 if the asset predates the counter. Works unauthenticated (public repo).
+release_published_aix_build() {
+    local tag=$1 rel url
+    rel=$(our_release_json "$tag")
+    [[ -n "$rel" ]] || { echo 0; return 0; }
+    url=$(jpy "[a['browser_download_url'] for a in d.get('assets', []) if a['name']=='vscodium-reh-aix-ppc64-$tag.json']" <<<"$rel" | head -1)
+    [[ -n "$url" ]] || { echo 0; return 0; }
+    curl -fsSL --retry 2 "$url" 2>/dev/null | jpy 'int(d.get("aix_build", 1))' 2>/dev/null || echo 1
+}
+
 release_set_latest() {
     local tag=$1
     local existing id

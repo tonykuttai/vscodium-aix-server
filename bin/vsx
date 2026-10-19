@@ -260,6 +260,12 @@ cmd___build_one() {
     manifest_set "$work" version "$version"
     manifest_set "$work" commit "$(server_commit "$server")"
     manifest_set "$work" built "$(now_iso)"
+    # Rebuilds are republished under the same tag and commit; a counter makes
+    # that visible to humans. `built` stays the key the extension compares.
+    local prev_aix_build
+    prev_aix_build=$(release_published_aix_build "$version" || echo 0)
+    manifest_set "$work" aix_build "$((prev_aix_build + 1))" int
+    (( prev_aix_build > 0 )) && info "this will be AIX build $((prev_aix_build + 1)) of $version (rebuild)"
     manifest_set "$work" node.version "$VSX_NODE_VERSION"
     manifest_set "$work" node.abi "$VSX_NODE_ABI"
     manifest_set "$work" node.source "$VSX_NODE_SOURCE"

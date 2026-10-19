@@ -71,11 +71,14 @@ server_foreign_binaries() {
 #-----------------------------------------------------------------------------
 # Manifest: small JSON we ship alongside the release and use for notes.
 #-----------------------------------------------------------------------------
+# manifest_set WORK KEY VALUE [int] : values are strings unless "int" is given.
 manifest_set() {
-    local work=$1 key=$2 value=$3
-    python3 - "$work/manifest.json" "$key" "$value" <<'PY'
+    local work=$1 key=$2 value=$3 kind=${4:-str}
+    python3 - "$work/manifest.json" "$key" "$value" "$kind" <<'PY'
 import json, os, sys
-path, key, value = sys.argv[1:4]
+path, key, value, kind = sys.argv[1:5]
+if kind == "int":
+    value = int(value)
 d = {}
 if os.path.exists(path):
     d = json.load(open(path))
@@ -370,6 +373,7 @@ VSCodium Remote Server for AIX (ppc64)
 Version: $version
 Commit: $commit
 Built: $(date)
+AIX build: $(manifest_get "$work" aix_build)
 Host: $(hostname) $(uname -s) $(uname -m) ($VSX_OS_LEVEL)
 Node: v$VSX_NODE_VERSION (ABI $VSX_NODE_ABI, $VSX_NODE_SOURCE)
 GCC: $VSX_GCC_VERSION
@@ -395,10 +399,18 @@ release_notes() {
     [[ -f "$manifest" ]] && commit=$(jpy 'd.get("commit","")' <"$manifest")
     [[ -n "$commit" ]] || commit=$(grep '^Commit:' "$VSX_RELEASES_DIR/$version/$base.info" | cut -d' ' -f2)
     [[ -n "$commit" ]] || die "cannot determine commit for $version (no manifest or .info)"
-    local sum
+    local sum aix_build built rebuild_note=""
     sum=$(cut -d' ' -f1 "$VSX_RELEASES_DIR/$version/$base.tar.gz.sha256")
+    aix_build=$([[ -f "$manifest" ]] && jpy 'd.get("aix_build", 1)' <"$manifest" || echo 1)
+    built=$([[ -f "$manifest" ]] && jpy 'd.get("built", "")' <"$manifest" || echo "")
+    if (( aix_build > 1 )); then
+        rebuild_note="**AIX build $aix_build** (rebuild of $version, built $built). Existing installs are refreshed automatically by aix-remote-ssh >= 0.1.1; with older extension versions run \`rm -rf ~/.vscodium-server/bin/$commit\` on the AIX host before reconnecting."
+    else
+        rebuild_note="AIX build $aix_build, built $built."
+    fi
     cat >"$out" <<EOF
 VSCodium Remote Server **$version** for IBM AIX 7.3 (ppc64). Unofficial community build.
+$rebuild_note
 
 Produced by [vscodium-aix-server](https://github.com/$VSX_RELEASE_REPO) from upstream
 [VSCodium $version](https://github.com/$VSX_UPSTREAM_REPO/releases/tag/$version): the Linux x64
