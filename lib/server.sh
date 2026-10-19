@@ -223,7 +223,7 @@ server_smoke_test() {
     # 3. the server boots, the extension host comes up, HTTP answers, and no
     #    AHAFS monitor was created (the fs.watch shim must keep us out of /aha:
     #    a wedged AHAFS blocks processes unkillably, see
-    #    notes/AIX-WATCHERS-AND-BINARIES.md).
+    #    the maintainers' internal incident notes (not in the repository)).
     local commit port
     commit=$(server_commit "$server")
 

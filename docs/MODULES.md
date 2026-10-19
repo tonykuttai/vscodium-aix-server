@@ -147,7 +147,7 @@ processes (it checks `process.argv` for `server-main.js`, `server-cli.js`,
   Reason: libuv's `fs.watch` on AIX is AHAFS (`/aha`), whose monitor pool is
   shared machine-wide and, once exhausted or wedged, blocks every process
   that touches it in an unkillable state (incident 2026-10-19, see
-  `notes/AIX-WATCHERS-AND-BINARIES.md`). `VSCODIUM_AIX_FSWATCH=off` restores
+  `the maintainers' internal incident notes (not in the repository)`). `VSCODIUM_AIX_FSWATCH=off` restores
   native behaviour for debugging; `=force` applies the shim in any process
   (used by the local test).
 * Tested off-AIX with any Node:

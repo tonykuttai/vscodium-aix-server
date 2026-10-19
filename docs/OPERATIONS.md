@@ -99,7 +99,7 @@ killed. Diagnose with `truss -f` on a hanging process (last syscalls are
 `node -e 'require("fs").watch("/tmp")'` hanging. Only root can clear it:
 `umount /aha && mount /aha`, or a reboot. Packages built since 2026-10-19
 never enter AHAFS (polling shim + polling @parcel/watcher) and the smoke
-test fails a build that does. Full write-up: `notes/AIX-WATCHERS-AND-BINARIES.md`.
+test fails a build that does. Full write-up in the maintainers' internal incident notes (kept outside the repository).
 
 ## Routine tasks
 

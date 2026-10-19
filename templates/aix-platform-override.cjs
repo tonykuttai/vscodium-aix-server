@@ -18,7 +18,7 @@
 //    kernel's AHAFS (/aha) event filesystem. AHAFS has a finite monitor pool
 //    shared by all users and, once wedged, blocks every process that touches
 //    it in an unkillable state until root remounts /aha or reboots (incident
-//    on cpap8104, 2026-10-19, see notes/AIX-WATCHERS-AND-BINARIES.md). The
+//    on cpap8104, 2026-10-19, see the maintainers' internal incident notes). The
 //    server must therefore never call into it. fs.watch and fs.promises.watch
 //    are replaced with a stat-polling implementation that keeps the FSWatcher
 //    contract VS Code relies on (non-recursive dir and file watches; recursive

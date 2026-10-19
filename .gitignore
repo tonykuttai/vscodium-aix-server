@@ -14,3 +14,7 @@ releases/
 *.swp
 *.swo
 *~
+
+# notes/ holds internal incident/status notes and stays out of the repository
+# (also listed in .git/info/exclude on the maintainer machine)
+notes/
