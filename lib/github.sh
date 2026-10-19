@@ -12,7 +12,7 @@ gh_api() {
     local method=$1 path=$2 body=${3:-}
     local url="$path"
     [[ "$path" == http* ]] || url="$GH_API$path"
-    local -a args=(-sS -L --retry 3 --retry-delay 2 -X "$method"
+    local -a args=(-sS -L --retry 3 --retry-delay 2 --connect-timeout 20 -m 120 -X "$method"
                    -H "Accept: application/vnd.github+json"
                    -H "X-GitHub-Api-Version: 2022-11-28"
                    -w '\n%{http_code}')
@@ -104,9 +104,10 @@ upstream_asset_url() {
 # Only plain N.N.N tags count; an early legacy release used a 'v' prefix and
 # is not something the extension can resolve.
 our_release_tags() {
-    gh_paginate "/repos/$VSX_RELEASE_REPO/releases" 5 \
-        | jpy '[r["tag_name"] for r in d if not r.get("draft")]' \
-        | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | ver_sort || true
+    local rels
+    rels=$(gh_paginate "/repos/$VSX_RELEASE_REPO/releases" 5) || return 1
+    jpy '[r["tag_name"] for r in d if not r.get("draft")]' <<<"$rels" \
+        | { grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' || true; } | ver_sort
 }
 
 # our_release_json TAG : release object or empty if none.

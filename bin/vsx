@@ -121,8 +121,9 @@ cmd_config() { config_show; }
 cmd_releases() {
     env_load_github_token || warn "no GitHub token; unauthenticated API (rate limited)"
     local upstream published v tag local_pkg count status
-    upstream=$(upstream_versions_since "$VSX_BACKFILL_FLOOR")
-    published=$(our_release_tags)
+    discover_releases
+    upstream=$DISCOVERED_UPSTREAM
+    published=$DISCOVERED_PUBLISHED
     printf '%-16s %-10s %-8s %-9s %s\n' VERSION PUBLISHED LOCAL ATTEMPTS STATUS
     for v in $upstream; do
         status="pending"
@@ -146,6 +147,8 @@ BUILD_FORCE=false
 BUILD_KEEP_WORK=false
 BUILD_RETRY=false
 BUILD_NO_SMOKE=false
+DISCOVERED_UPSTREAM=""
+DISCOVERED_PUBLISHED=""
 
 parse_build_opts() {
     BUILD_VERSIONS=()
@@ -175,13 +178,23 @@ build_child_flags() {
     printf '%s\n' "${f[@]}"
 }
 
-# pending_versions : upstream versions above the floor that are not published
+# discover_releases : fills DISCOVERED_UPSTREAM (versions above the floor)
+# and DISCOVERED_PUBLISHED. A GitHub API failure is fatal here on purpose:
+# "nothing pending" must never be the result of a failed lookup.
+discover_releases() {
+    DISCOVERED_UPSTREAM=$(upstream_versions_since "$VSX_BACKFILL_FLOOR") \
+        || die "GitHub API: could not list upstream releases of $VSX_UPSTREAM_REPO"
+    DISCOVERED_PUBLISHED=$(our_release_tags) \
+        || die "GitHub API: could not list releases of $VSX_RELEASE_REPO"
+}
+
+# pending_versions : discovered upstream versions that are not published
 # (and not parked by the attempt limiter unless --retry/--force).
+# Requires discover_releases to have run.
 pending_versions() {
-    local published v
-    published=$(our_release_tags)
-    for v in $(upstream_versions_since "$VSX_BACKFILL_FLOOR"); do
-        if grep -qx "$v" <<<"$published" && ! $BUILD_FORCE; then continue; fi
+    local v
+    for v in $DISCOVERED_UPSTREAM; do
+        if grep -qx "$v" <<<"$DISCOVERED_PUBLISHED" && ! $BUILD_FORCE; then continue; fi
         if ! $BUILD_RETRY && ! $BUILD_FORCE && attempts_should_skip "$v"; then
             warn "skipping $v: failed $VSX_MAX_ATTEMPTS times; use --retry or wait ${VSX_RETRY_AFTER_HOURS}h"
             continue
@@ -203,8 +216,8 @@ cmd_build() {
 
     local -a versions=()
     case "$BUILD_SELECT" in
-        --latest)  versions=("$(upstream_latest_version)") ;;
-        --missing) mapfile -t versions < <(pending_versions) ;;
+        --latest)  versions=("$(upstream_latest_version)") || die "GitHub API: could not read the latest upstream release" ;;
+        --missing) discover_releases; mapfile -t versions < <(pending_versions) ;;
         "")        versions=("${BUILD_VERSIONS[@]}") ;;
     esac
     if (( ${#versions[@]} == 0 )); then
@@ -530,8 +543,9 @@ cmd_cron() {
 
     stage="discover"
     local upstream_latest published_latest pending
-    upstream_latest=$(upstream_latest_version)
-    published_latest=$(our_release_tags | ver_max)
+    upstream_latest=$(upstream_latest_version) || die "GitHub API: could not read the latest upstream release"
+    discover_releases
+    published_latest=$(ver_max <<<"$DISCOVERED_PUBLISHED")
     mapfile -t pending < <(pending_versions)
     info "upstream latest $upstream_latest, published latest ${published_latest:-none}, pending: ${pending[*]:-none}"
 
@@ -553,7 +567,8 @@ cmd_cron() {
 
     stage="digest"
     if digest_due; then
-        published_latest=$(our_release_tags | ver_max)
+        discover_releases
+        published_latest=$(ver_max <<<"$DISCOVERED_PUBLISHED")
         local still_pending
         still_pending=$(pending_versions | tr '\n' ' ')
         digest_send "$upstream_latest" "${published_latest:-none}" "$still_pending" || warn "digest email failed"
