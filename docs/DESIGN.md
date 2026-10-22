@@ -1,9 +1,11 @@
 # Design
 
 This document explains how `vsx` is put together and why. Read it before
-changing the pipeline. For day-to-day operation see
-[OPERATIONS.md](OPERATIONS.md); for the per-module AIX specifics see
-[MODULES.md](MODULES.md).
+changing the runner. For day-to-day operation see
+[OPERATIONS.md](OPERATIONS.md); for where each AIX fix lives see
+[MODULES.md](MODULES.md). How the server is built (patches, addon fixes, gulp
+target, smoke test) is documented in the VSCodium fork:
+[docs/howto-build-aix.md](https://github.com/tonykuttai/vscodium/blob/aix/docs/howto-build-aix.md).
 
 ## 1. Problem
 
@@ -16,52 +18,67 @@ page. Nobody should have to remember to do that: an AIX host should notice new
 upstream releases and publish AIX builds on its own, and tell a human only
 when something needs attention.
 
-## 2. Approach: repackage, don't rebuild
+VSCodium cannot do it for us: its releases are built by GitHub Actions in
+Linux containers with cross toolchains or qemu, and AIX has no cross
+toolchain, no container image and no hosted runner.
 
-Building VS Code from source on AIX is not realistic (Electron toolchain,
-hours of build time, constant upstream churn). Almost all of the server is
-platform-neutral JavaScript. What is platform specific is small:
+## 2. Approach: build from source, in two repositories
 
-| What | Why it matters on AIX |
-|---|---|
-| `node` runtime | upstream ships a Linux x86-64 ELF binary |
-| `@vscode/native-watchdog` | C++ addon |
-| `@vscode/spdlog` | C++ addon |
-| `node-pty` | C++ addon, needs `openpty`/`forkpty` that AIX libc lacks |
-| `@parcel/watcher` | C++ addon, no AIX backend upstream |
-| ripgrep (`@vscode/ripgrep-universal`) | Rust binary |
-| `@vscode/deviceid` | JS that rejects unknown platforms |
-| `process.platform` | VS Code only has `linux`/`darwin`/`win32` code paths |
+Until 2026-10 the pipeline downloaded VSCodium's Linux x64 server tarball and
+transplanted AIX-built native pieces into it. That worked, but every component
+needed its own builder, Linux binaries stayed in the package (sqlite3,
+kerberos), and nothing could go upstream. The spike of 2026-10-22/23 showed
+that VS Code's own build runs natively on AIX: the JS half only needs Node 24
+(esbuild ships an `aix-ppc64` binary that is already in VS Code's lockfile),
+and the native half is the set of addons we already knew how to build. A
+full `gulp vscode-reh-aix-ppc64-min` takes about 8 minutes on
+`wyvernden6aix73` with a warm npm cache.
 
-So the pipeline downloads the upstream `vscodium-reh-linux-x64-<v>.tar.gz`,
-replaces exactly those pieces with AIX builds, proves the result starts, and
-re-tars it as `vscodium-reh-aix-ppc64-<v>.tar.gz`.
+The work is split the way VSCodium itself is split:
+
+| Repository | Holds | Analogue in VSCodium |
+|---|---|---|
+| fork `tonykuttai/vscodium`, branch `aix` | `patches/aix/*.patch` (the `aix-ppc64` gulp target, launchers, shim, one extension build fix), `build/aix/` (`package_reh.sh`, `fix-node-modules.sh`, `fix-build-tools.sh`, `ripgrep.sh`, `verify_reh.sh`, addon patches), `docs/howto-build-aix.md` | `patches/linux/`, `build/linux/package_reh.sh` |
+| this repository (`vsx`) | discovery of upstream versions, fork checkout, driving the build, packaging in the release layout, upload, notifications, retention, cron | `.github/workflows/stable-linux.yml` |
+
+The fork is a pure superset of upstream VSCodium: `master` mirrors
+`upstream/master`, `aix` is a short stack of topic commits on top, rebased
+(never merged) when VSCodium moves `upstream/stable.json`. Builds that were
+published are tagged `aix/<version>` so any release can be rebuilt. If
+VSCodium ever accepts `patches/aix` + `build/aix` as a community-built target,
+the fork shrinks to nothing and the runner keeps working unchanged. The
+runner **never carries build logic**; if something about the build needs
+fixing, it is fixed in the fork.
 
 ## 3. Principles
 
-1. **Track upstream exactly.** Every native component is built from the
-   upstream tag matching the version found in the downloaded server's own
-   `node_modules/<pkg>/package.json`. The JS half and the native half of a
-   module therefore always agree. "Latest" means "what upstream ships", not
-   "HEAD of some repo", which is what broke ripgrep in September 2026.
+1. **Track upstream exactly.** Every version is built from the VS Code commit
+   VSCodium's `upstream/stable.json` names for it, with VSCodium's own
+   `get_repo.sh`, `prepare_vscode.sh` and gulp tasks. The native addons are
+   compiled by `npm rebuild` from the versions in VS Code's lockfile, so the
+   JS and native halves always agree. The runner refuses to build a version
+   from a fork ref whose `stable.json` names a different VS Code tag.
 2. **Self-contained packages.** The official nodejs.org AIX build of the Node
-   major upstream targets is bundled as `$ROOT/node`, exactly as upstream
+   version in `remote/.npmrc` is bundled as `$ROOT/node`, exactly as upstream
    bundles its Linux node. End users need no Node installation.
-3. **Prove it before publishing.** A build is only packaged after every
-   addon loads under the bundled runtime, ripgrep runs, the real server
-   starts, logs `Extension host agent listening`, answers `GET /version`,
-   and has created no AHAFS monitor. The server is run in its own process
-   group and stopped by polling, never by a blocking `wait`.
+3. **Prove it before publishing.** `build/aix/verify_reh.sh` runs inside the
+   build: every addon is a 64-bit XCOFF object that loads under the bundled
+   node; the AIX shim is active in server processes (fs.watch polling,
+   platform spoof); `@parcel/watcher.subscribe()` delivers an event; `rg`
+   searches; the server boots, `GET /version` answers with its commit; no
+   AHAFS monitor was created; the remote CLI runs. The runner then checks
+   the tree is complete before packaging.
 4. **Every exit path reports.** Failures email and open a GitHub issue;
    successes close the issue; quiet days still produce one digest. There is
-   no path that ends in silence (the original pipeline had three).
-5. **Idempotent and resumable.** Module builds are cached by (module,
-   version, Node ABI). Uploads skip assets that exist. Re-running anything is
-   safe.
-6. **Bash only, GNU userland, AIX quirks isolated.** The build must run on a
-   stock AIX 7.3 host with Toolbox packages, unattended, from cron. All AIX
-   specifics (ARG_MAX, no `flock`, no `jq`, no `pgrep`, `LIBPATH`, XCOFF) are
-   handled in `lib/` so module scripts stay readable.
+   no path that ends in silence.
+5. **Idempotent and resumable.** The fork clone, the npm cache, the target
+   Node runtime tree and the ripgrep binary are cached; worktrees are
+   recreated per build. Uploads skip assets that exist. Re-running anything
+   is safe.
+6. **Bash only, GNU userland, no root.** The runner must work on a stock
+   AIX 7.3 host with Toolbox packages plus a user-local `~/local`,
+   unattended, from cron. AIX specifics (ARG_MAX, no `flock`, no `pgrep`,
+   `LIBPATH`) are handled in `lib/`.
 
 ## 4. Architecture
 
@@ -77,91 +94,129 @@ re-tars it as `vscodium-reh-aix-ppc64-<v>.tar.gz`.
  bin/vsx __build-one V   bin/vsx __build-one W      one child process per version
      |                                              (keeps errexit semantics)
      v
- fetch -> runtime -> modules -> node+launchers -> smoke -> package -> upload
+ fork -> worktree -> build (child bash: VSCodium scripts + build/aix/package_reh.sh)
+      -> manifest -> package -> upload
 ```
 
 ### Layers
 
 | Path | Role |
 |---|---|
-| `bin/vsx` | CLI, argument parsing, the per-version pipeline, cron orchestration |
+| `bin/vsx` | CLI, argument parsing, the per-version pipeline, `upload_version`, prune, cron orchestration |
 | `lib/common.sh` | strict mode, logging, ERR trap, locking, version compare, JSON via python |
 | `lib/config.sh` | defaults, config file, derived directories |
-| `lib/env.sh` | PATH/GNU tools, toolchain facts, GitHub token, portlibforaix, Node runtime selection |
+| `lib/env.sh` | PATH/GNU tools, toolchain facts, report of the tools as the build child sees them, GitHub token |
+| `lib/source.sh` | fork sync, ref selection, worktree, the build child, manifest facts, packaging |
+| `lib/server.sh` | build manifest (`manifest.json`) and release notes rendered from it |
 | `lib/github.sh` | REST calls: upstream discovery, our releases, assets, issues |
 | `lib/notify.sh` | events log, attempt tracking, email, issues, digest |
-| `lib/server.sh` | server tree: fetch, inspect, runtime install, launchers, smoke test, package, release notes |
-| `lib/modules.sh` | module contract, cache, runner, shared helpers |
-| `modules/*.sh` | one file per native component |
-| `templates/` | launcher scripts and the platform override shipped in the package |
-| `patches/` | source patches applied to upstream tags |
 | `config/` | documented example configuration |
 | `cron/` | cron entry point |
 
 ### The per-version pipeline (`cmd___build_one`)
 
-1. **fetch** the upstream REH tarball into `~/.cache/vsx/downloads` and
-   extract to `~/.cache/vsx/work/<v>/server`.
-2. **runtime**: derive the VS Code tag (`1.140.06880 -> 1.140.0`), read
-   `remote/.npmrc` from microsoft/vscode for `target=`, pick that version
-   (or the newest same-major) with an `aix-ppc64` tarball on nodejs.org,
-   download, verify SHA256, cache under `~/.cache/vsx/node`. Export
-   `VSX_NODE_*` so every module compiles against *this* runtime's headers
-   and `node.exp`, and uses *its* npm/node-gyp.
-3. **modules**: for each entry of `VSX_MODULES`, `module_run` asks the module
-   for the wanted version, builds it (cached), installs it into the tree and
-   records it in `manifest.json`.
-4. **node + launchers**: replace the ELF `node` with the stripped AIX one;
-   render `bin/<app>-server`, `bin/remote-cli/<app>`, `bin/aix-env.sh` and
-   `aix-platform-override.cjs` from `templates/`.
-5. **smoke**: required addons present + XCOFF + load; ripgrep runs; server
-   boots to "Extension host agent listening" within `VSX_SMOKE_TIMEOUT`.
-6. **package**: tar with the commit id as the single top-level directory
-   (the extension extracts with `--strip-components 1`), plus `.sha256`,
-   `.info`, `.json` (manifest).
-7. **upload**: create or update the release, upload missing assets, set
+Stage names are what failure emails quote.
+
+1. **fork**: `fork_sync` clones or fetches `VSX_FORK_REPO` into
+   `VSX_FORK_DIR` (`~/.cache/vsx/fork`). `fork_ref_for V` picks tag
+   `aix/V` if it exists (a build that was published before), else the head
+   of branch `VSX_FORK_REF` (`aix`).
+2. **worktree**: a detached `git worktree` at
+   `~/.cache/vsx/work/V/vscodium`. Its `upstream/stable.json` must name V's
+   VS Code tag (`1.140.06880 -> 1.140.0`; VSCodium encodes the VS Code patch
+   level as the first digit of its build number). Otherwise the build stops
+   with "rebase the aix branch onto VSCodium tag V and tag it aix/V": the
+   runner never builds a version from the wrong VS Code commit.
+3. **build**: a child `bash` with `LIBPATH` unset sources
+   `VSX_BUILD_ENV_FILE` (`~/local/env.sh`), unsets `LIBPATH` again, and
+   runs in the worktree: `get_repo.sh` (shallow VS Code checkout at the
+   commit from `stable.json`), `version.sh`,
+   `SKIP_NPM_INSTALL=yes prepare_vscode.sh` (VSCodium's patches plus
+   `patches/aix`, `product.json`), then `build/aix/package_reh.sh`, which
+   installs dependencies, applies the AIX fixes to `node_modules`, rebuilds
+   the addons against the target Node, runs
+   `gulp vscode-reh-aix-ppc64-min` and `build/aix/verify_reh.sh`. The
+   runner passes `RELEASE_VERSION`, `OS_NAME=aix`, the cache directories,
+   `VSCODE_AIX_LIBUTIL`/`VSCODE_AIX_RIPGREP`/`VSCODE_AIX_RUST_HOME` from
+   its config, and `GITHUB_TOKEN`.
+4. **manifest**: `manifest_from_reh` records the server commit, VS Code
+   tag and commit, fork ref and commit, bundled Node version, the version
+   of every shipped addon and of `rg`, the toolchain and host, and the
+   `aix_build` counter (how many times this version was published).
+5. **package**: `vscode-reh-aix-ppc64/` is copied under a directory named
+   after the commit id and tarred as
+   `releases/V/vscodium-reh-aix-ppc64-V.tar.gz`, with
+   `aix-build-manifest.json` inside, plus `.sha256`, `.info` and `.json`.
+   VSCodium's own tarballs are `.`-rooted; ours has one top-level directory
+   because the AIX extension's native-tar extraction path needs one
+   (`--strip-components 1` works with both).
+6. **upload**: create or update the release, upload missing assets, set
    `make_latest` only if this is the highest version we publish (backfills
    must not steal "latest"; the extension falls back to `/releases/latest`).
+7. The worktree and work dir are removed unless `--keep-work`; the attempt
+   counter is cleared.
 
-### Module contract
+### Release contract with the extension
 
-A module is a sourced bash file defining `mod_<name>_wanted`, `_build`,
-`_install`, optionally `_cache_key` and `_note`. See the header of
-`lib/modules.sh`. Builds run in a subshell with `set -e` re-enabled so any
-failing command aborts the build (bash silently disables `-e` inside anything
-tested by `if`/`||`/`!`; the original scripts fell into exactly that trap).
+Unchanged from the transplant pipeline, and the reason the switch was
+invisible to users: tag == VSCodium version, asset
+`vscodium-reh-aix-ppc64-<version>.tar.gz`, one top-level directory in the
+tarball, bundled Node, `/releases/latest` is the newest version. The
+`aix_build` counter and `built` timestamp in the manifest let the extension
+refresh an install when a version is rebuilt under the same tag.
 
 ### State and caches
 
 | Location | Contents | Lifetime |
 |---|---|---|
-| `~/.local/state/vsx/` | lock, `events.jsonl`, `attempts/<v>`, `digest.last`, `logs/` | small, kept |
-| `~/.cache/vsx/downloads/` | upstream tarballs, node tarballs, nodejs index | pruned with releases |
-| `~/.cache/vsx/node/` | extracted Node runtimes | kept (one per version) |
-| `~/.cache/vsx/modules/<m>/<key>/` | module sources + build log + artifacts | kept (rebuild by deleting) |
-| `~/.cache/vsx/work/<v>/` | server tree being built | removed on success |
+| `~/.local/state/vsx/` | lock, `events.jsonl`, `attempts/<v>`, `digest.last`, `last-pipeline-error`, `logs/` | small, kept |
+| `~/.cache/vsx/fork/` | clone of the VSCodium fork | kept, fetched each build |
+| `~/.cache/vsx/work/<v>/` | `vscodium/` worktree (with `vscode/` checkout and `vscode-reh-aix-ppc64/` output), `stage/`, `manifest.json` | removed on success |
+| `~/.cache/vsx/npm/` | npm cache (`npm_config_cache`) | kept; the reason later builds take minutes |
+| `~/.cache/vsx/node/` | target Node runtime trees (headers, `node.exp`) fetched by `package_reh.sh` | kept (one per version) |
+| `~/.cache/vsx/ripgrep/` | `rg` built by `build/aix/ripgrep.sh`, per (tag, rustc) | kept |
 | `<repo>/releases/<v>/` | packaged artifacts | newest `VSX_KEEP_RELEASES` kept |
 
 ## 5. Decisions and alternatives considered
 
-**Bundle Node instead of relying on `/opt/nodejs`.** The old packages
-dispatched to `/opt/nodejs/bin/node` on the *user's* machine, so every AIX
-target needed a root-installed Node of the right major, and the build host's
-Node had to match too. nodejs.org ships official `aix-ppc64` tarballs, they
-run on AIX 7.3 with the Toolbox GCC runtime, and their npm/node-gyp work on
-AIX. Bundling costs ~40 MB compressed and removes a whole class of failures.
-`VSX_NODE_RUNTIME=host` keeps the old behaviour if ever needed.
+**Build on the AIX host, not hybrid.** The alternative was VSCodium's Linux
+`package_reh.sh` in a ppc64le container plus `remote/node_modules` built on
+AIX and shipped across, the way VS Code does for alpine: two machines and an
+rsync hand-off for the same patch set. One machine and one cron won once the
+spike showed the whole build runs natively in minutes.
 
-**Build modules at the bundled version, not a fork's HEAD.** node-pty was
-built from a fork that had diverged 213 commits behind upstream, with build
-artifacts committed. The fork's actual AIX change is 27 lines; it now lives
-in `patches/node-pty-aix.patch` and is applied to the upstream tag. One
-additional guard change for newer node-pty is done in the module script.
+**Fork + runner, not one repository.** The patches and build scripts mirror
+VSCodium's layout so that an upstream pull request is a copy; the runner is
+what VSCodium's GitHub Actions do for them and is not upstream material.
+Secrets, cron and notifications stay out of the fork.
+
+**Tag what we ship.** `fork_ref_for` prefers `aix/<version>`, so a rebuild
+(`--force`) uses the fork commit that produced the published package, not
+whatever `aix` has become since.
+
+**Refuse a mismatched `stable.json`.** Building version V from a fork ref
+prepared for another VS Code release would produce a server with a commit id
+the extension never matches. One JSON read turns that late, confusing
+failure into a one-line instruction.
+
+**Bundle Node.** nodejs.org ships official `aix-ppc64` tarballs that run on
+AIX 7.3 with the Toolbox GCC runtime; gulp fetches the version from
+`remote/.npmrc` and the addons are linked against that exact tree's
+`node.exp`. Bundling costs ~40 MB compressed and removes a whole class of
+failures (root-installed Node of the right major on every target).
 
 **One child process per version.** Bash cannot keep `errexit` alive inside
 `if ! build_one; then`, and a loop over versions must survive one failure.
 Re-executing `vsx __build-one` gives each build clean error semantics and an
-EXIT trap that notifies.
+EXIT trap that notifies. The build itself runs in a further child `bash` so
+VSCodium's `set -e` scripts and `~/local/env.sh` never touch the runner's
+shell.
+
+**Never export the runtime `LIBPATH` into the build.** The Toolbox compiler
+binaries are 32-bit; with the 64-bit runtime directories that
+`bin/aix-env.sh` sets first on `LIBPATH`, `gcc` refuses to start. The build
+child starts with `LIBPATH` unset and unsets it again after sourcing the
+environment file.
 
 **GitHub issues in addition to email.** Mail on AIX depends on sendmail
 configuration that nobody monitors; an issue is visible to every maintainer
@@ -179,27 +234,37 @@ retrying automatically later and immediately with `--retry`.
 libuv uses for `fs.watch`, has a machine-wide monitor pool; when it wedges,
 every process entering it blocks unkillably until root remounts `/aha` or
 reboots (incident 2026-10-19). All file watching in the package is therefore
-polling: `@parcel/watcher` with a polling `subscribe` patch for workspaces,
-and an `fs.watch` shim in the preloaded override for VS Code's own handful of
-non-recursive watches. Slower reaction to external changes is the accepted
-price.
+polling: `@parcel/watcher` with a polling `subscribe` backend for
+workspaces, and an `fs.watch` shim in the preloaded override for VS Code's
+own handful of non-recursive watches. The smoke test fails a build whose
+server creates a monitor. Slower reaction to external changes is the
+accepted price.
 
-**No `jq`, no `flock`, no `pgrep`.** Not on the Toolbox host. Python 3 is,
-so JSON goes through `jpy`, locks are `mkdir`, processes are `ps | grep`.
-Large JSON never travels through argv (AIX `ARG_MAX` is small).
+**No `jq`, no `flock`, no `pgrep` in the runner.** Python 3 is on every
+Toolbox host, so the runner's JSON goes through `jpy`, locks are `mkdir`,
+processes are `ps | grep`. Large JSON never travels through argv (AIX
+`ARG_MAX` is small). VSCodium's own scripts do need `jq`, which is why the
+build host carries a user-local one.
 
 ## 6. Known gaps / future work
 
-* `@vscode/sqlite3` and `kerberos` remain Linux binaries in the package. The
-  server starts and works without them today (they are loaded lazily); if a
-  future VS Code requires sqlite on the server, add a module for it.
 * All file watching is polling (see "Never touch AHAFS" above), so large
-  workspaces react more slowly than on Linux. An AHAFS backend is not a
-  goal: it is the thing that took the build host down.
+  workspaces react more slowly than on Linux and the git pane can lag. A
+  native AHAFS backend for `@parcel/watcher` is upstream-sized work and not
+  planned.
+* The `process.platform` shim is still a runtime preload. Replacing it with
+  source patches (`platform.ts` plus the handful of direct checks) is
+  possible now that the source is built; decide after measuring what breaks
+  each way.
+* Big-endian: `@vscode/l10n-dev`'s tree-sitter init is deferred during the
+  build; VS Code's Node-only unit tests (`npm run test-node`) have not been
+  run on AIX yet and may surface more endianness findings.
 * Only `powerpc-ibm-aix7.3` is tested. Packages likely run on 7.2 TL5 with a
   recent Toolbox GCC runtime, but nothing checks that.
-* The smoke test proves the server starts; it does not open a terminal or
-  search. Driving the server over its protocol would catch more.
-* Rust on the host is whatever the Toolbox provides. If a ripgrep tag ever
-  needs a newer MSRV than installed, the build fails fast with a clear
-  message; the fix is a user-local or Toolbox Rust upgrade.
+* The smoke test does not open a terminal. Driving the server over its
+  protocol (`scripts/test-remote-integration.sh`) would catch more.
+* Caching is coarse: checkout and `node_modules` are redone per version
+  (fast thanks to the npm cache). Per-commit caches would help if upstream
+  ever publishes several versions a day.
+* Every AIX fix is a downstream workaround; [MODULES.md](MODULES.md) lists
+  the upstream pull requests that would remove them.

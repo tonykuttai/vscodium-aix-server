@@ -14,19 +14,10 @@ jobs:
       - name: bash -n
         run: |
           set -e
-          for f in bin/vsx lib/*.sh modules/*.sh cron/*.sh templates/*.sh; do
+          for f in bin/vsx lib/*.sh cron/*.sh; do
             bash -n "$f"
           done
       - name: shellcheck
         run: |
-          shellcheck -S warning -x bin/vsx lib/*.sh modules/*.sh cron/*.sh
+          shellcheck -S warning -x bin/vsx lib/*.sh cron/*.sh
           # Templates are POSIX sh and sourced with $ROOT set by the caller.
-          shellcheck -S warning -s sh -e SC2148,SC2154 templates/*.sh
-      - name: templates render
-        run: |
-          python3 - <<'PY'
-          import re, pathlib
-          for p in pathlib.Path("templates").glob("*.sh"):
-              text = p.read_text()
-              print(p, sorted(set(re.findall(r"@([A-Z_]+)@", text))))
-          PY

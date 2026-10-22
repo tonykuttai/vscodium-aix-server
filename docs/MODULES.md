@@ -1,178 +1,66 @@
-# Native modules: AIX notes
+# AIX fixes: where they live
 
-What each component needs on AIX, where its version comes from, and what to
-look at when it breaks. The code is in `modules/<name>.sh`; shared helpers in
-`lib/modules.sh`.
+The runner no longer builds native modules itself. Everything that makes the
+server build and run on AIX is in the VSCodium fork
+(<https://github.com/tonykuttai/vscodium>, branch `aix`):
 
-Common to all C/C++ addons:
+| Where | What |
+|---|---|
+| `patches/aix/00-reh-add-aix-ppc64.patch` | the `aix-ppc64` target in `build/gulpfile.reh.ts` (nodejs.org `aix-ppc64` runtime, `aix-ppc64` in `RIPGREP_PLATFORMS`), the launchers (`bin/codium-server`, `bin/remote-cli/codium`, `bin/helpers/browser.sh`, `bin/aix-env.sh`), the `aix-platform-override.cjs` shim, `.moduleignore.aix` |
+| `patches/aix/01-ext-microsoft-authentication-aix.patch` | `case 'aix'` in the extension's esbuild config |
+| `build/aix/package_reh.sh` | the build: `~/.gyp/include.gypi`, `npm ci`, fixes, `npm rebuild` against the target Node, gulp, verify, archive. Mirrors `build/linux/package_reh.sh` |
+| `build/aix/fix-node-modules.sh` | per-package edits in `remote/node_modules` (node-pty, @parcel/watcher, kerberos, @vscode/deviceid, ripgrep-universal); **each block's comment names the upstream fix that would make it unnecessary** |
+| `build/aix/node-pty-aix.patch`, `build/aix/parcel-watcher-polling.patch` | source patches applied by the fixer |
+| `build/aix/fix-build-tools.sh` | big-endian fix for the build tooling (`@vscode/l10n-dev`); nothing shipped is touched |
+| `build/aix/ripgrep.sh` | builds `rg` from the tag `@vscode/ripgrep-universal` pins, cached per (tag, rustc) |
+| `build/aix/verify_reh.sh` | the smoke test (also run by `vsx smoke`) |
+| `docs/howto-build-aix.md` | prerequisites, hand-build procedure, what the package contains that Linux does not |
 
-* Compiled against the headers of the Node runtime that will be bundled
-  (`$VSX_NODE_INCLUDE`), linked with its import file (`-Wl,-bimport:node.exp`),
-  using the runtime's own `npm` and `node-gyp` (`vsx_npm`, `vsx_node_gyp`,
-  which pass `--nodedir` so no headers are downloaded).
-* Flags: `CFLAGS/CXXFLAGS="-ftls-model=global-dynamic -fPIC -pthread"`,
-  64-bit (`-maix64`, set by node-gyp's AIX support).
-* Upstream `binding.gyp` files often add `-fstack-protector-strong`, which
-  Toolbox GCC rejects; `strip_stack_protector` removes it.
-* Output is verified with `verify_addon`: must be a 64-bit XCOFF object and
-  must `require()` under the bundled node.
-* Results are cached in `~/.cache/vsx/modules/<name>/<version>-node<ABI>/`.
+Read those files for the details; this page only says what breaks on AIX,
+how it is worked around, and what would have to change upstream for the
+workaround to disappear.
 
-## native-watchdog (`@vscode/native-watchdog`)
+## Catalog
 
-* Source: `microsoft/node-native-watchdog`, tag `v<version>`.
-* Build: `node-gyp rebuild` after stripping the stack protector flag.
-* Install: `node_modules/@vscode/native-watchdog/build/Release/watchdog.node`
-  (and the legacy unscoped `node_modules/native-watchdog/` if present).
+| Component | AIX problem | Fix | Where (fork) | Upstream PR candidate |
+|---|---|---|---|---|
+| all addons (node-gyp) | Toolbox GCC rejects `-fstack-protector-strong`; addons need `-fPIC` and `-ftls-model=global-dynamic` (local-exec TLS is refused by the loader); 64-bit XCOFF | `~/.gyp/include.gypi` with `cflags!` and the two flags, written by `package_reh.sh`; `-maix64` comes from node-gyp's AIX support | `build/aix/package_reh.sh` | microsoft/node-spdlog, microsoft/node-native-watchdog: make the flag `OS!="aix"` (medium likelihood) |
+| all addons (link) | node-gyp takes `node.exp` (template symbols the executable exports) from the *running* node, not `--nodedir`; addons built with the host Node fail to load under the bundled one | fetch the target Node tree once (`~/.cache/vsx/node`) and run `remote/` `npm rebuild` with *its* npm | `build/aix/package_reh.sh` | nodejs/node-gyp: resolve `node.exp` from `--nodedir` on AIX (likely, clear bug) |
+| libstdc++ at runtime | addons built by g++ need the GCC runtime on `LIBPATH`; nodejs.org's node does not carry it | `bin/aix-env.sh` prepends the highest installed GCC runtime dir, `/opt/freeware/lib64` and node-pty's `lib/native-libs`; sourced by every launcher | `patches/aix/00-…` | none (downstream launcher) |
+| `node-pty` | no `openpty/forkpty/login_tty` in libc; no `<pty.h>`; `pty_close_inherited_fds` only under `__linux__` | `node-pty-aix.patch` (`<termios.h>` ladder, prototypes, targeted guard); link portlibforaix `libutil` from `lib/native-libs`, shipped in the package | `build/aix/fix-node-modules.sh`, `build/aix/node-pty-aix.patch` | microsoft/node-pty: implement the three functions for `_AIX` with `posix_openpt/grantpt/unlockpt/ioctl(TIOCSCTTY)`, no libutil (likely) |
+| `@parcel/watcher` | no `OS=="aix"` in `binding.gyp`; `dirent` has no `d_type`; brute-force backend's `subscribe()` throws a bare C string, escapes `catch (std::exception&)` and aborts the File Watcher process, after which VS Code falls back to `fs.watch` = AHAFS | aix gyp block (brute-force + watchman sources, `BRUTE_FORCE_POLLING`); `S_ISDIR(st_mode)` in `legacy.cc`; polling subscriptions (`PARCEL_WATCHER_POLL_INTERVAL_MS`, default 2000 ms); `prebuilds/` removed | `build/aix/fix-node-modules.sh`, `build/aix/parcel-watcher-polling.patch` | parcel-bundler/watcher: `std::runtime_error` instead of C string, `S_ISDIR` fallback (very likely); polling backend and aix gyp block as opt-in (likely) |
+| `kerberos` | `kerberos_common.h` selects the win32 SSPI backend unless `__linux__`/`__APPLE__`; gyp lists GSSAPI sources only for mac/linux; `dlopen` of `libgssapi_krb5` by soname fails (Toolbox ships no `.so.2` file) | `_AIX` guard, `OS=="aix"` conditions, libs from `krb5-config --libs gssapi`, `kerberos_use_rtld=false` | `build/aix/fix-node-modules.sh`, `build/aix/package_reh.sh` | mongodb-js/kerberos: `defined(_AIX)` + `OS=="aix"` (likely) |
+| `@vscode/deviceid` | `dist/index.js` rejects platforms other than win32/darwin/linux/freebsd; `dist/storage.js` picks a path per OS | `sed`: treat `aix` like `linux` (idempotent) | `build/aix/fix-node-modules.sh` | microsoft/vscode-deviceid: two one-line changes (likely) |
+| `@vscode/ripgrep-universal` | ships `bin/<platform>-<arch>/rg` for a fixed list, no AIX | `rg` built from the pinned ripgrep tag (vscode-ripgrep → ripgrep-prebuilt `config.json` → BurntSushi tag), `--features pcre2`, copied to `bin/aix-ppc64/`; `aix-ppc64` added to `RIPGREP_PLATFORMS` | `build/aix/ripgrep.sh`, `build/aix/fix-node-modules.sh`, `patches/aix/00-…` | microsoft/ripgrep-prebuilt `aix-ppc64` (unlikely, no AIX CI; we keep building) |
+| ripgrep build (`memmap2` crate) | `madvise()` needs a `caddr_t` cast on AIX | vendor the locked memmap2 version, `sed`, `[patch.crates-io]` | `build/aix/ripgrep.sh` | RazrFalcon/memmap2-rs (likely; check whether a newer version has it) |
+| `process.platform` | server, pty host and deviceid have linux/darwin/win32 paths only | `aix-platform-override.cjs` reports `linux` when the stack contains `ptyHost|server-main|server-cli|deviceid`, the real platform otherwise (ripgrep-universal in particular); preloaded via `node -r` and `NODE_OPTIONS=--require` in `bin/aix-env.sh`, inert in non-VS Code processes | `patches/aix/00-…` | none; alternative is `patches/aix` on `src/vs/base/common/platform.ts` (decide after measuring) |
+| `fs.watch` | libuv implements it with AHAFS on AIX; the machine-wide monitor pool can wedge the host (incident 2026-10-19) | the shim replaces `fs.watch`/`fs.promises.watch` with stat polling (`VSCODIUM_AIX_FSWATCH_INTERVAL_MS`, default 1000 ms); `{recursive:true}` throws so VS Code uses @parcel/watcher; `VSCODIUM_AIX_FSWATCH=off` restores native for debugging; `verify_reh.sh` fails a build that creates a monitor | `patches/aix/00-…`, `build/aix/verify_reh.sh` | libuv/libuv: issue first (document or optionally disable AHAFS `fs.watch`) |
+| `@vscode/l10n-dev` (build tooling) | initialises web-tree-sitter (Emscripten wasm glue, little-endian only) at import; on big-endian the promise rejects and gulp treats it as fatal | defer the init error to first use (never reached by the REH build) | `build/aix/fix-build-tools.sh` | microsoft/vscode-l10n: lazy init (likely); microsoft/vscode `build/lib/i18n.ts`: lazy import (medium) |
+| `microsoft-authentication` extension | its esbuild config has no `aix` case | `case 'aix'` with the linux layout | `patches/aix/01-…` | microsoft/vscode (medium; AIX is unsupported there) |
+| `jq` on the build host | `malloc(0)` returns NULL on AIX; jq treats it as out of memory on any input | patched `src/jv_alloc.c`, static 64-bit build under `~/local` | host setup ([howto](https://github.com/tonykuttai/vscodium/blob/aix/docs/howto-build-aix.md)) | jqlang/jq (likely, portability bug) |
+| launchers | `readlink -f` absent on base AIX; `check-requirements-linux.sh` is glibc-only | AIX launchers resolve `ROOT` portably and ship no requirements check (the extension's `server-setup.sh` special-cases aix) | `patches/aix/00-…` | none (downstream) |
+| tarball layout | the AIX extension's native-tar extraction needs one top-level directory; VSCodium tars `.` | the runner re-tars with the commit id as top-level dir | `lib/source.sh:source_package` (this repo) | jeanp413/open-remote-ssh, with the rest of the AIX extension support (Phase 4) |
 
-## node-spdlog (`@vscode/spdlog`)
+Not needed on AIX: `@vscode/fs-copyfile` (macOS-only addon, JS fallback),
+`@vscode/windows-*` (no-ops), `cpu-features`/`ssh2` optional natives (never
+built upstream either), `koffi` (gone with VSCodium's copilot removal).
 
-* Source: `microsoft/node-spdlog`, tag `v<version>`; spdlog itself is a git
-  submodule (`git submodule update --init --recursive`).
-* Build: `npm install --ignore-scripts` (for `node-addon-api`), then
-  `node-gyp rebuild`.
-* Runtime: needs libstdc++ from the GCC runtime on `LIBPATH`;
-  `bin/aix-env.sh` adds the highest installed GCC runtime directory.
+## Adding an AIX fix
 
-## node-pty
-
-* Source: `microsoft/node-pty`, tag `v<version>` (currently `v1.2.0-beta.15`).
-* AIX problems: no `<pty.h>` functions in libc (`openpty`, `forkpty`,
-  `login_tty`); newer versions call `pty_close_inherited_fds()` which upstream
-  only defines for Linux.
-* Fixes:
-  * `patches/node-pty-aix.patch` (3 hunks): AIX includes, `extern "C"`
-    prototypes for the three pty functions. Extracted from the
-    `tonykuttai/node-pty` fork, whose actual AIX diff is these ~27 lines.
-  * the module script widens `#if defined(__linux__)` around
-    `SetCloseOnExec`/`pty_close_inherited_fds` to include `_AIX` (the
-    `fcntl(FD_CLOEXEC)` fallback works on AIX).
-  * `libutil.so.2` from [portlibforaix](https://github.com/tonykuttai/portlibforaix)
-    provides the pty functions. `env_ensure_portlib` clones and builds it
-    into `~/local/portlibforaix` once. The library is linked explicitly and
-    shipped at `node_modules/node-pty/lib/native-libs/libutil.so.2`;
-    `bin/aix-env.sh` puts that directory on `LIBPATH`.
-* Build: by hand with `g++` (compile + link), not node-gyp. **Do not add
-  portlibforaix's `include/` to the include path**: it contains a `stdio.h`
-  that shadows the system header and breaks `<cstdio>`. The patch also must
-  not `#include <pty.h>`: AIX has none, and a stray one under
-  `/opt/freeware/include` on one host hid that until a second host failed.
-* Verified with `LIBPATH` pointing at `lib/native-libs`.
-* The JS side (`lib/unixTerminal.js`) calls `pty.fork()` with a signature
-  that changed over time; building the same tag the server bundles keeps
-  both sides in sync. If a future tag changes `pty.cc` so the patch no
-  longer applies, regenerate it: the three blocks are the `_AIX` include
-  block near the top, the `_AIX` branch in the platform include ladder, and
-  the `extern "C"` prototypes after the `POSIX_SPAWN_SETSID` define.
-
-## parcel-watcher (`@parcel/watcher`)
-
-* Source: `parcel-bundler/watcher`, tag `v<version>`.
-* AIX problems: no `OS=="aix"` branch in `binding.gyp`; `struct dirent` has
-  no `d_type`.
-* Fixes (in the module script):
-  * a Python edit inserts an `OS=="aix"` block using the brute-force backend
-    (`src/unix/legacy.cc`, `src/shared/BruteForceBackend.cc`) and the
-    watchman backend sources, with our flags; the file is re-validated with
-    `ast.literal_eval` (gyp files are Python literals).
-  * `legacy.cc`: `bool isDir = ent->d_type == DT_DIR;` becomes
-    `S_ISDIR(attrib.st_mode)`; the `fstatat()` filling `attrib` is on the
-    previous line upstream.
-* Build: `npm install --ignore-scripts`, `node-gyp rebuild`.
-  * `patches/parcel-watcher-polling.patch`: upstream's brute-force backend
-    has no `subscribe()` (it throws a C string, which escapes Backend.cc's
-    `catch (std::exception&)` and aborts the extension host). Behind
-    `BRUTE_FORCE_POLLING` (defined in our gyp block) the patch adds one
-    polling thread per watcher: rescan with `readTree`, diff with
-    `DirTree::getChanges`, `watcher->notify()`. State lives on
-    `Watcher::state`; the thread never takes `Backend::mMutex`, so
-    `unsubscribe` (called with it held) can join safely. Errors during a
-    rescan go through `mEvents.error()` and polling continues.
-* Install: `node_modules/@parcel/watcher/build/Release/watcher.node`;
-  `prebuilds/` is removed so the loader cannot pick a Linux binary.
-* Consequence: file watching polls (`PARCEL_WATCHER_POLL_INTERVAL_MS`,
-  default 2000 ms, wait stretches to 3x scan time). Fine for normal
-  projects; large trees are slower to react than on Linux.
-
-## ripgrep
-
-* Which version: VS Code depends on `@vscode/ripgrep-universal` (>= 1.140)
-  or `@vscode/ripgrep` (older). Both come from `microsoft/vscode-ripgrep`,
-  whose `build/platforms.js` (universal) or `lib/postinstall.js` (classic)
-  pins a `microsoft/ripgrep-prebuilt` release, whose `config.json` names the
-  `BurntSushi/ripgrep` tag. `mod_ripgrep_wanted` follows that chain (1.140 →
-  universal 1.18.0 → prebuilt v15.0.1 → ripgrep 15.0.0). If any link is
-  missing it falls back to `VSX_RIPGREP_FALLBACK_TAG` and logs a warning.
-* AIX problems: `memmap2`'s `madvise()` needs a `caddr_t` cast; upstream
-  HEAD may need a newer Rust than the Toolbox ships.
-* Fixes: the memmap2 version from `Cargo.lock` is cloned into `vendor/`,
-  patched with `sed`, and wired in with `[patch.crates-io]`; the tag's
-  `rust-version` is compared with the host `rustc` first
-  (`rust_check_msrv`) so a too-old toolchain fails in seconds with a clear
-  message.
-* Build: `cargo build --release --features pcre2` (bundled PCRE2, JIT works).
-* Cache key: `<tag>-rustc<version>` so a Rust upgrade recompiles.
-* Install: for ripgrep-universal, `bin/aix-ppc64/rg` **and**
-  `bin/linux-ppc64/rg` (its `index.js` builds the path from
-  `process.platform`, which the override reports as `linux` when loaded
-  from the server); other platform directories are removed. For classic
-  `@vscode/ripgrep`, `bin/rg`.
-
-## deviceid (`@vscode/deviceid`)
-
-* No compilation. `dist/index.js` refuses platforms other than
-  win32/darwin/linux/freebsd and `dist/storage.js` picks a path per OS; both
-  are `sed`-patched in place to treat `aix` like `linux`. Idempotent.
-* The Windows-only `build/Release/windows.node` is left alone.
-
-## The runtime shim (`templates/aix-platform-override.cjs`)
-
-Not a module, but it is what makes the modules usable. It is a `.cjs` file on
-purpose: the server's `package.json` declares `"type": "module"`, so a `.js`
-file in the server root is loaded as an ES module and `require` is undefined
-(the smoke-test guard caught exactly that on wyvernden). Preloaded into every
-Node process of the server via `NODE_OPTIONS=--require` (set in
-`bin/aix-env.sh`) and `-r` in the launchers; inert outside VS Code's own
-processes (it checks `process.argv` for `server-main.js`, `server-cli.js`,
-`bootstrap-fork` or a `--type=` child and otherwise removes itself from
-`NODE_OPTIONS`).
-
-* `process.platform` returns `linux` when the call stack contains `ptyHost`,
-  `server-main`, `server-cli` or `deviceid`; `aix` otherwise.
-* `fs.watch` / `fs.promises.watch` are replaced with stat polling
-  (`PollingFSWatcher`): non-recursive directory and file watches, the
-  `FSWatcher` events `change`/`rename`/`error`/`close`, `ref`/`unref`,
-  `AbortSignal`; `{ recursive: true }` throws
-  `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` so VS Code uses @parcel/watcher.
-  Reason: libuv's `fs.watch` on AIX is AHAFS (`/aha`), whose monitor pool is
-  shared machine-wide and, once exhausted or wedged, blocks every process
-  that touches it in an unkillable state (incident 2026-10-19, see
-  `the maintainers' internal incident notes (not in the repository)`). `VSCODIUM_AIX_FSWATCH=off` restores
-  native behaviour for debugging; `=force` applies the shim in any process
-  (used by the local test).
-* Tested off-AIX with any Node:
-  `VSCODIUM_AIX_FSWATCH=force node -r templates/aix-platform-override.cjs <test>`.
-  The smoke test on AIX fails the build if a monitor for its paths appears
-  under `/aha/fs/modDir.monFactory`.
-
-## Not rebuilt (yet)
-
-* `@vscode/sqlite3` (`vscode-sqlite3.node`) and `kerberos`: Linux binaries
-  remain in the package. The server starts and works without them. If a
-  future VS Code needs sqlite on the server side, add `modules/sqlite3.sh`
-  (it is a straightforward node-gyp build) and add it to `VSX_MODULES` and
-  the smoke test's required list.
-
-## Adding a module
-
-1. Create `modules/<name>.sh` defining `mod_<name>_wanted`, `_build`,
-   `_install` (and optionally `_cache_key`, `_note`). Use the helpers:
-   `git_clone_tag`, `strip_stack_protector`, `vsx_npm`, `vsx_node_gyp`,
-   `verify_addon`, `install_file`.
-2. Append the name to `VSX_MODULES` in `lib/modules.sh` (native builds
-   before JS patches).
-3. If it ships a `.node` file, add its path to `required` in
-   `server_smoke_test` (`lib/server.sh`).
-4. Test with `vsx module <name> <vscodium-version>` then a full
-   `vsx build <version> --no-upload`.
-5. Document it here.
+1. Reproduce in a kept worktree
+   (`vsx build <v> --no-upload --keep-work`, tree at
+   `~/.cache/vsx/work/<v>/vscodium`), following the fork's howto for the
+   hand steps.
+2. Put the fix where it belongs, most upstream-friendly first: a pull
+   request to the package; else `patches/aix/*.patch` for VS Code build
+   files; else `~/.gyp/include.gypi` for a compiler flag every addon needs;
+   else a block in `build/aix/fix-node-modules.sh` (idempotent, guarded by a
+   layout check that fails loudly when the package changes, with a comment
+   naming the upstream fix).
+3. If it ships a new `.node`, add it to the required list in
+   `build/aix/verify_reh.sh`; if it changes runtime behaviour, add a check
+   there (the smoke test is the only gate).
+4. One topic commit on the fork's `aix` branch; its CI proves the patches
+   still apply. Then `vsx build <v> --no-upload --keep-work` from the
+   runner, a client session against the staged package, and a row in the
+   table above.

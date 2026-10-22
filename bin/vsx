@@ -1,18 +1,15 @@
 #!/usr/bin/env bash
 #
-# vsx - VSCodium Remote Server for AIX: build, verify, publish.
+# vsx - VSCodium Remote Server for AIX: build from source, verify, publish.
 #
-#   vsx check                         host / toolchain / config report
+#   vsx check                         host / toolchain / fork / config report
 #   vsx config                        effective configuration
 #   vsx releases                      upstream vs published vs local table
 #   vsx build VERSION... [opts]       build (and publish) specific versions
 #   vsx build --latest  [opts]        newest upstream release
 #   vsx build --missing [opts]        every upstream release not yet published
 #   vsx upload VERSION [--force]      publish an already packaged version
-#   vsx smoke SERVER_DIR              start-up test of an extracted server
-#   vsx module NAME VSCODIUM_VERSION  build one module against that server
-#   vsx cache export|import FILE      move built modules + Node runtimes
-#                                     between hosts (no Rust needed to import)
+#   vsx smoke SERVER_DIR              the fork's smoke test on an extracted server
 #   vsx prune [--dry-run] [--legacy]  apply retention to local artifacts
 #   vsx cron                          what the cron job runs (lock, missing,
 #                                     prune, digest, log rotation)
@@ -21,7 +18,12 @@
 # Build options:
 #   --no-upload   package only          --force      rebuild/re-upload anyway
 #   --keep-work   keep work tree        --retry      ignore attempt limits
-#   --no-smoke    skip start-up test (debugging only; never for releases)
+#
+# How a version is built: the VSCodium fork (VSX_FORK_REPO, ref VSX_FORK_REF or
+# tag aix/VERSION) is checked out into a git worktree; VSCodium's get_repo.sh and
+# prepare_vscode.sh run, then the fork's build/aix/package_reh.sh builds the
+# server with VS Code's own gulp pipeline and smoke-tests it. This runner only
+# discovers versions, drives that, packages, publishes and reports.
 #
 # Configuration: ~/.config/vsx/vsx.conf (see config/vsx.conf.example) or
 # VSX_* environment variables.
@@ -43,8 +45,8 @@ source "$VSX_HOME/lib/github.sh"
 source "$VSX_HOME/lib/notify.sh"
 # shellcheck source=../lib/server.sh
 source "$VSX_HOME/lib/server.sh"
-# shellcheck source=../lib/modules.sh
-source "$VSX_HOME/lib/modules.sh"
+# shellcheck source=../lib/source.sh
+source "$VSX_HOME/lib/source.sh"
 
 config_load
 env_setup_path
@@ -81,33 +83,15 @@ cmd_check() {
     if [[ "$(uname -s)" != "AIX" ]]; then
         echo "NOTE: not an AIX host; only lint and read-only commands work here."
     else
-        local missing_pkgs=()
-        env_check_gnu_tools && echo "GNU grep/sed/tar/sort: ok" || { rc=1; missing_pkgs+=(coreutils grep sed tar); }
-        local t
-        for t in git gcc g++ gmake python3 curl wget tar file sha256sum patch strip; do
-            if ! have "$t"; then
-                rc=1
-                case "$t" in
-                    g++) missing_pkgs+=(gcc-c++) ;; gmake) missing_pkgs+=(make) ;;
-                    sha256sum) missing_pkgs+=(coreutils) ;; strip) echo "strip: MISSING (base AIX bos.adt)" ;;
-                    *) missing_pkgs+=("$t") ;;
-                esac
-                echo "$t: MISSING"
-            fi
-        done
-        (( ${#missing_pkgs[@]} == 0 )) && echo "build tools: ok"
-        if have cargo && have rustc; then
-            echo "rust: ok"
-        else
-            echo "rust: missing. ripgrep can only be built with Rust; without it, import a build from another host (vsx cache import)."
-            missing_pkgs+=(rust cargo)
-        fi
+        env_check_gnu_tools && echo "GNU grep/sed/tar/sort: ok" || rc=1
+        echo "build tools (as the build child sees them, after $VSX_BUILD_ENV_FILE):"
+        env_build_tools_report | sed 's/^/  /' || rc=1
         have mailx || have mail || have sendmail || echo "mail: no mailx/mail/sendmail; email notifications will fail"
-        if (( ${#missing_pkgs[@]} > 0 )); then
-            echo
-            echo "To install the missing AIX Toolbox packages (needs root):"
-            echo "  dnf install $(printf '%s\n' "${missing_pkgs[@]}" | sort -u | tr '\n' ' ')"
-        fi
+    fi
+    if git ls-remote -q --exit-code "$VSX_FORK_REPO" "refs/heads/$VSX_FORK_REF" >/dev/null 2>&1; then
+        echo "fork: $VSX_FORK_REPO branch $VSX_FORK_REF reachable"
+    else
+        echo "fork: cannot reach $VSX_FORK_REPO branch $VSX_FORK_REF"; rc=1
     fi
     env_load_github_token || { echo "GitHub token: MISSING ($VSX_GITHUB_TOKEN_FILE or GITHUB_TOKEN)"; rc=1; }
     [[ -n "$VSX_EMAIL_TO" ]] || echo "VSX_EMAIL_TO not set: no emails will be sent"
@@ -146,7 +130,6 @@ BUILD_NO_UPLOAD=false
 BUILD_FORCE=false
 BUILD_KEEP_WORK=false
 BUILD_RETRY=false
-BUILD_NO_SMOKE=false
 DISCOVERED_UPSTREAM=""
 DISCOVERED_PUBLISHED=""
 
@@ -159,7 +142,6 @@ parse_build_opts() {
             --force)     BUILD_FORCE=true ;;
             --keep-work) BUILD_KEEP_WORK=true ;;
             --retry)     BUILD_RETRY=true ;;
-            --no-smoke)  BUILD_NO_SMOKE=true ;;
             --latest|--missing) BUILD_SELECT="$1" ;;
             -h|--help)   usage; exit 0 ;;
             -*)          die "unknown option: $1" ;;
@@ -174,7 +156,6 @@ build_child_flags() {
     $BUILD_NO_UPLOAD && f+=(--no-upload)
     $BUILD_FORCE     && f+=(--force)
     $BUILD_KEEP_WORK && f+=(--keep-work)
-    $BUILD_NO_SMOKE  && f+=(--no-smoke)
     printf '%s\n' "${f[@]}"
 }
 
@@ -259,59 +240,34 @@ cmd___build_one() {
     }
     trap _build_exit EXIT
 
-    section "Building VSCodium $version for AIX"
+    section "Building VSCodium $version for AIX from source"
     attempts_bump "$version"
-    local work server
+    local work tree fork_commit fork_ref
     work=$(work_dir_for "$version")
-    server="$work/server"
-    if $BUILD_FORCE; then rm -rf "$work"; fi
+    if $BUILD_FORCE; then source_worktree_remove "$version"; rm -rf "$work"; fi
     mkdir -p "$work"
     rm -f "$work/manifest.json"
 
-    stage="fetch";   server_fetch "$version"
-    stage="runtime"; node_runtime_select "$version"
+    stage="fork";     fork_sync
+    read -r fork_commit fork_ref < <(fork_ref_for "$version")
+    info "fork: $VSX_FORK_REPO $fork_ref @ $fork_commit"
+    stage="worktree"; tree=$(source_worktree "$version" "$fork_commit")
+
     manifest_set "$work" version "$version"
-    manifest_set "$work" commit "$(server_commit "$server")"
     manifest_set "$work" built "$(now_iso)"
+    manifest_set "$work" fork.repo "$VSX_FORK_REPO"
+    manifest_set "$work" fork.ref "$fork_ref"
+    manifest_set "$work" fork.commit "$fork_commit"
     # Rebuilds are republished under the same tag and commit; a counter makes
     # that visible to humans. `built` stays the key the extension compares.
     local prev_aix_build
     prev_aix_build=$(release_published_aix_build "$version" || echo 0)
     manifest_set "$work" aix_build "$((prev_aix_build + 1))" int
     (( prev_aix_build > 0 )) && info "this will be AIX build $((prev_aix_build + 1)) of $version (rebuild)"
-    manifest_set "$work" node.version "$VSX_NODE_VERSION"
-    manifest_set "$work" node.abi "$VSX_NODE_ABI"
-    manifest_set "$work" node.source "$VSX_NODE_SOURCE"
-    manifest_set "$work" node.upstream_target "${VSX_NODE_UPSTREAM_TARGET:-}"
-    manifest_set "$work" toolchain.gcc "$VSX_GCC_VERSION"
-    manifest_set "$work" toolchain.rustc "$VSX_RUSTC_VERSION"
-    manifest_set "$work" toolchain.host "$(hostname) $VSX_OS_LEVEL"
 
-    local m
-    for m in "${VSX_MODULES[@]}"; do
-        stage="module:$m"
-        module_run "$m" "$server" "$work"
-    done
-
-    stage="runtime-install"; server_install_node "$server"
-    stage="launchers";       server_install_launchers "$server"
-
-    local foreign
-    foreign=$(server_foreign_binaries "$server" | tr '\n' ' ')
-    if [[ -n "$foreign" ]]; then
-        warn "foreign (Linux) native binaries remain, loaded lazily or unused on AIX: $foreign"
-        manifest_set "$work" foreign_binaries "$foreign"
-    fi
-
-    if $BUILD_NO_SMOKE; then
-        warn "smoke test SKIPPED (--no-smoke)"
-        manifest_set "$work" smoke_test "skipped"
-    else
-        stage="smoke"; server_smoke_test "$server"
-        manifest_set "$work" smoke_test "passed"
-    fi
-
-    stage="package"; server_package "$version"
+    stage="build";    source_build "$version" "$tree"
+    stage="manifest"; manifest_from_reh "$work" "$(reh_dir_for "$version")" "$tree"
+    stage="package";  source_package "$version"
     event_record built "$version" "packaged"
 
     if $BUILD_NO_UPLOAD; then
@@ -323,6 +279,7 @@ cmd___build_one() {
     if $BUILD_KEEP_WORK; then
         info "work tree kept: $work"
     else
+        source_worktree_remove "$version"
         rm -rf "$work"
     fi
     attempts_clear "$version"
@@ -370,86 +327,22 @@ cmd_upload() {
 }
 
 #=============================================================================
-# smoke / module (debugging aids)
+# smoke (debugging aid): the fork's smoke test on any extracted server tree
 #=============================================================================
 cmd_smoke() {
     local dir=${1:-}
     [[ -d "$dir" && -f "$dir/product.json" ]] || die "usage: vsx smoke SERVER_DIR"
     [[ -x "$dir/node" ]] || die "$dir/node missing or not executable"
-    VSX_NODE_BIN="$dir/node"
-    VSX_NODE_VERSION=$("$VSX_NODE_BIN" -p 'process.versions.node')
-    export VSX_NODE_BIN VSX_NODE_VERSION
-    server_smoke_test "$dir"
-}
-
-cmd_module() {
-    local name=${1:-} version=${2:-}
-    [[ -n "$name" && -n "$version" ]] || die "usage: vsx module NAME VSCODIUM_VERSION"
-    env_require_build_tools
-    env_load_github_token || true
-    start_run_log "module-$name-$version"
-    local work server
-    work=$(work_dir_for "$version"); server="$work/server"
-    mkdir -p "$work"
-    server_fetch "$version"
-    node_runtime_select "$version"
-    module_run "$name" "$server" "$work"
-}
-
-#=============================================================================
-# cache export / import : move built artifacts between hosts
-#=============================================================================
-# Carries module build results (not their sources) and the Node runtime
-# tarballs, so a second host can package without a Rust toolchain or a slow
-# first compile. Artifacts are AIX 7.3 / GCC runtime neutral within the same
-# oslevel generation; the smoke test still validates them on the importing
-# host.
-cmd_cache() {
-    local action=${1:-} file=${2:-}
-    case "$action" in
-        export)
-            [[ -n "$file" ]] || die "usage: vsx cache export FILE.tar.gz"
-            local tmp
-            tmp=$(mktemp -d)
-            mkdir -p "$tmp/modules" "$tmp/downloads"
-            local m k
-            for m in "$VSX_MODULE_CACHE_DIR"/*/; do
-                [[ -d "$m" ]] || continue
-                for k in "$m"*/; do
-                    [[ -f "$k/.build-complete" ]] || continue
-                    mkdir -p "$tmp/modules/$(basename "$m")/$(basename "$k")"
-                    # everything except the source/build tree
-                    ( cd "$k" && tar -cf - --exclude=./src . ) | ( cd "$tmp/modules/$(basename "$m")/$(basename "$k")" && tar -xf - )
-                done
-            done
-            cp "$VSX_DOWNLOADS_DIR"/node-v*-aix-ppc64.tar.gz "$VSX_DOWNLOADS_DIR"/node-v*.SHASUMS256.txt "$tmp/downloads/" 2>/dev/null || true
-            cat >"$tmp/MANIFEST" <<EOF
-vsx cache export
-host: $(hostname) $(uname -s) $VSX_OS_LEVEL
-gcc: $VSX_GCC_VERSION  rustc: ${VSX_RUSTC_VERSION:-none}
-date: $(now_iso)
-EOF
-            tar -C "$tmp" -czf "$file" .
-            rm -rf "$tmp"
-            info "exported to $file ($(human_size "$(file_size "$file")")):"
-            tar -tzf "$file" | grep -E 'build-complete|node-v' | sed 's/^/  /'
-            ;;
-        import)
-            [[ -f "$file" ]] || die "usage: vsx cache import FILE.tar.gz"
-            local tmp
-            tmp=$(mktemp -d)
-            tar -C "$tmp" -xzf "$file"
-            [[ -f "$tmp/MANIFEST" ]] || { rm -rf "$tmp"; die "not a vsx cache export: $file"; }
-            info "importing cache made on: $(sed -n 2p "$tmp/MANIFEST")"
-            mkdir -p "$VSX_MODULE_CACHE_DIR" "$VSX_DOWNLOADS_DIR"
-            [[ -d "$tmp/modules" ]] && cp -r "$tmp/modules/." "$VSX_MODULE_CACHE_DIR/"
-            [[ -d "$tmp/downloads" ]] && cp "$tmp/downloads/"* "$VSX_DOWNLOADS_DIR/" 2>/dev/null
-            rm -rf "$tmp"
-            info "imported into $VSX_CACHE_DIR; modules now cached:"
-            find "$VSX_MODULE_CACHE_DIR" -name .build-complete | sed "s|$VSX_MODULE_CACHE_DIR/||; s|/.build-complete||; s/^/  /"
-            ;;
-        *) die "usage: vsx cache export|import FILE.tar.gz" ;;
-    esac
+    fork_sync
+    local commit
+    read -r commit _ < <(fork_ref_for "$(json_field "$dir/product.json" version)" 2>/dev/null || echo "origin/$VSX_FORK_REF x")
+    local tmp
+    tmp=$(mktemp -d)
+    git -C "$VSX_FORK_DIR" archive "$commit" build/aix | tar -C "$tmp" -xf -
+    bash "$tmp/build/aix/verify_reh.sh" "$dir" "$VSX_SMOKE_TIMEOUT"
+    local rc=$?
+    rm -rf "$tmp"
+    return $rc
 }
 
 #=============================================================================
@@ -490,17 +383,15 @@ cmd_prune() {
         [[ -e "$stray" ]] && "${rm_cmd[@]}" "$stray"
     done
 
-    section "Prune: work trees and downloads"
+    section "Prune: work trees (fork worktrees) and downloads"
     local d
     for d in "$VSX_WORK_DIR"/*/; do
         [[ -d "$d" ]] || continue
-        "${rm_cmd[@]}" "$d"
+        if $dry; then echo "would remove $d"; else source_worktree_remove "$(basename "$d")"; rm -rf "$d"; fi
     done
-    # Keep upstream tarballs for the versions we still keep locally.
+    # Downloads from the old transplant pipeline (upstream Linux tarballs) are no longer used.
     for d in "$VSX_DOWNLOADS_DIR"/vscodium-reh-linux-x64-*.tar.gz; do
-        [[ -f "$d" ]] || continue
-        v=$(basename "$d" .tar.gz); v=${v#vscodium-reh-linux-x64-}
-        grep -qx "$v" <<<"$keep" || "${rm_cmd[@]}" "$d"
+        [[ -f "$d" ]] && "${rm_cmd[@]}" "$d"
     done
 
     if $legacy; then
@@ -624,9 +515,7 @@ main() {
         __build-one)  cmd___build_one "$@" ;;
         upload)       cmd_upload "$@" ;;
         smoke)        cmd_smoke "$@" ;;
-        module)       cmd_module "$@" ;;
         prune)        cmd_prune "$@" ;;
-        cache)        cmd_cache "$@" ;;
         cron)         cmd_cron "$@" ;;
         notify-test)  cmd_notify_test "$@" ;;
         help|-h|--help) usage ;;

@@ -15,7 +15,7 @@ VSX_EMAIL_TO="you@example.com"
 # ---- repositories ------------------------------------------------------
 #VSX_UPSTREAM_REPO=VSCodium/vscodium
 #VSX_RELEASE_REPO=tonykuttai/vscodium-aix-server
-#VSX_GITHUB_TOKEN_FILE=$HOME/.config/github/token   # or export GITHUB_TOKEN
+#VSX_GITHUB_TOKEN_FILE=$HOME/.config/github/token   # also tried: $HOME/.config/vscodium-aix/github-token   # or export GITHUB_TOKEN
 
 # ---- what to build -----------------------------------------------------
 # `vsx build --missing` / `vsx cron` consider every upstream release newer
@@ -26,33 +26,30 @@ VSX_EMAIL_TO="you@example.com"
 #VSX_MAX_ATTEMPTS=3
 #VSX_RETRY_AFTER_HOURS=24
 
-# ---- node runtime ------------------------------------------------------
-# bundle: ship the official nodejs.org aix-ppc64 Node that matches upstream's
-#         target major inside the tarball (self-contained; recommended).
-# host:   build against and dispatch to VSX_HOST_NODE (legacy behaviour).
-#VSX_NODE_RUNTIME=bundle
-#VSX_HOST_NODE=/opt/nodejs/bin/node
-#VSX_NODE_FALLBACK_VERSION=24.21.0
+# ---- source build ------------------------------------------------------
+# The VSCodium fork that carries patches/aix and build/aix. A version is built
+# from tag aix/<version> when it exists, else from VSX_FORK_REF, whose
+# upstream/stable.json must name that version's VS Code tag.
+#VSX_FORK_REPO=https://github.com/tonykuttai/vscodium.git
+#VSX_FORK_REF=aix
+#VSX_FORK_DIR=$HOME/.cache/vsx/fork
+# Sourced by the build child first: user-local Node (.nvmrc version), jq, Rust.
+#VSX_BUILD_ENV_FILE=$HOME/local/env.sh
+# portlibforaix libutil for node-pty; optional prebuilt aix-ppc64 rg (skips the
+# Rust build); IBM Open SDK for Rust bin dir for build/aix/ripgrep.sh.
+#VSX_AIX_LIBUTIL=$HOME/local/portlibforaix/lib/libutil.so.2
+#VSX_AIX_RIPGREP=
+#VSX_RUST_HOME=$HOME/local/RustSDK/1.86/bin
+#VSX_MAX_OLD_SPACE_SIZE=8192
 
 # ---- directories -------------------------------------------------------
 #VSX_STATE_DIR=$HOME/.local/state/vsx     # lock, logs, events, attempts
 #VSX_CACHE_DIR=$HOME/.cache/vsx           # downloads, node runtimes, module builds, work trees
 #VSX_RELEASES_DIR=$VSX_HOME/releases      # packaged tarballs
-#VSX_PORTLIB_DIR=$HOME/local/portlibforaix
 
 # ---- retention ---------------------------------------------------------
 #VSX_KEEP_RELEASES=3   # local release dirs + upstream downloads to keep
 #VSX_KEEP_LOGS=40
 
-# ---- smoke test --------------------------------------------------------
-#VSX_SMOKE_TIMEOUT=120  # seconds to wait for "Extension host agent listening"
-
-# ---- module sources (point at forks if needed) -------------------------
-#VSX_REPO_NODE_PTY=https://github.com/microsoft/node-pty.git
-#VSX_REPO_SPDLOG=https://github.com/microsoft/node-spdlog.git
-#VSX_REPO_WATCHDOG=https://github.com/microsoft/node-native-watchdog.git
-#VSX_REPO_PARCEL_WATCHER=https://github.com/parcel-bundler/watcher.git
-#VSX_REPO_RIPGREP=https://github.com/BurntSushi/ripgrep.git
-#VSX_REPO_MEMMAP2=https://github.com/RazrFalcon/memmap2-rs.git
-#VSX_REPO_PORTLIB=https://github.com/tonykuttai/portlibforaix.git
-#VSX_RIPGREP_FALLBACK_TAG=15.0.0
+# ---- smoke test (build/aix/verify_reh.sh timeout) ------------------------
+#VSX_SMOKE_TIMEOUT=240  # seconds build/aix/verify_reh.sh waits for "Extension host agent listening"

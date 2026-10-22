@@ -43,22 +43,25 @@ config_load() {
     # Hours to wait before automatically retrying a failed version.
     : "${VSX_RETRY_AFTER_HOURS:=24}"
 
-    # --- node runtime ------------------------------------------------------
-    # bundle : download the official nodejs.org AIX build that matches the
-    #          Node major upstream targets, compile addons against it, and
-    #          ship it inside the tarball as $ROOT/node (self-contained).
-    # host   : build against and dispatch to VSX_HOST_NODE (legacy layout).
-    : "${VSX_NODE_RUNTIME:=bundle}"
-    : "${VSX_HOST_NODE:=/opt/nodejs/bin/node}"
-    : "${VSX_NODE_DIST_URL:=https://nodejs.org/dist}"
-    # Used only if upstream's required Node version cannot be determined.
-    : "${VSX_NODE_FALLBACK_VERSION:=24.21.0}"
+    # --- source build (the VSCodium fork that carries patches/aix + build/aix) --
+    : "${VSX_FORK_REPO:=https://github.com/tonykuttai/vscodium.git}"
+    # Branch to build from when no per-version tag aix/<version> exists.
+    : "${VSX_FORK_REF:=aix}"
+    : "${VSX_FORK_DIR:=$HOME/.cache/vsx/fork}"
+    # Sourced by the build child before anything else: puts the user-local
+    # Node (.nvmrc version), jq and Rust on PATH. No root on AIX hosts.
+    : "${VSX_BUILD_ENV_FILE:=$HOME/local/env.sh}"
+    # portlibforaix libutil for node-pty; an aix-ppc64 rg to skip the Rust build;
+    # the IBM Open SDK for Rust bin dir used by build/aix/ripgrep.sh.
+    : "${VSX_AIX_LIBUTIL:=$HOME/local/portlibforaix/lib/libutil.so.2}"
+    : "${VSX_AIX_RIPGREP:=}"
+    : "${VSX_RUST_HOME:=$HOME/local/RustSDK/1.86/bin}"
+    : "${VSX_MAX_OLD_SPACE_SIZE:=8192}"
 
     # --- directories -------------------------------------------------------
     : "${VSX_STATE_DIR:=$HOME/.local/state/vsx}"
     : "${VSX_CACHE_DIR:=$HOME/.cache/vsx}"
     : "${VSX_RELEASES_DIR:=$VSX_HOME/releases}"
-    : "${VSX_PORTLIB_DIR:=$HOME/local/portlibforaix}"
     : "${VSX_FREEWARE_BIN:=/opt/freeware/bin}"
 
     # --- retention ---------------------------------------------------------
@@ -73,42 +76,31 @@ config_load() {
     : "${VSX_ISSUE_LABEL:=build-failure}"
     : "${VSX_DIGEST_ENABLED:=true}"
 
-    # --- smoke test --------------------------------------------------------
-    : "${VSX_SMOKE_TIMEOUT:=120}"
-
-    # --- module sources (override to point at forks) -----------------------
-    : "${VSX_REPO_NODE_PTY:=https://github.com/microsoft/node-pty.git}"
-    : "${VSX_REPO_SPDLOG:=https://github.com/microsoft/node-spdlog.git}"
-    : "${VSX_REPO_WATCHDOG:=https://github.com/microsoft/node-native-watchdog.git}"
-    : "${VSX_REPO_PARCEL_WATCHER:=https://github.com/parcel-bundler/watcher.git}"
-    : "${VSX_REPO_RIPGREP:=https://github.com/BurntSushi/ripgrep.git}"
-    : "${VSX_REPO_MEMMAP2:=https://github.com/RazrFalcon/memmap2-rs.git}"
-    : "${VSX_REPO_PORTLIB:=https://github.com/tonykuttai/portlibforaix.git}"
-    : "${VSX_RIPGREP_FALLBACK_TAG:=15.0.0}"
+    # --- smoke test (build/aix/verify_reh.sh timeout, seconds) ---------------
+    : "${VSX_SMOKE_TIMEOUT:=240}"
 
     export VSX_UPSTREAM_REPO VSX_RELEASE_REPO VSX_GITHUB_TOKEN_FILE
     export VSX_BACKFILL_FLOOR VSX_MAX_ATTEMPTS VSX_RETRY_AFTER_HOURS
-    export VSX_NODE_RUNTIME VSX_HOST_NODE VSX_NODE_DIST_URL VSX_NODE_FALLBACK_VERSION
-    export VSX_STATE_DIR VSX_CACHE_DIR VSX_RELEASES_DIR VSX_PORTLIB_DIR VSX_FREEWARE_BIN
+    export VSX_FORK_REPO VSX_FORK_REF VSX_FORK_DIR VSX_BUILD_ENV_FILE
+    export VSX_AIX_LIBUTIL VSX_AIX_RIPGREP VSX_RUST_HOME VSX_MAX_OLD_SPACE_SIZE
+    export VSX_STATE_DIR VSX_CACHE_DIR VSX_RELEASES_DIR VSX_FREEWARE_BIN
     export VSX_KEEP_RELEASES VSX_KEEP_LOGS
     export VSX_EMAIL_TO VSX_EMAIL_FROM VSX_EMAIL_ENABLED VSX_ISSUES_ENABLED VSX_ISSUE_LABEL VSX_DIGEST_ENABLED
     export VSX_SMOKE_TIMEOUT
-    export VSX_REPO_NODE_PTY VSX_REPO_SPDLOG VSX_REPO_WATCHDOG VSX_REPO_PARCEL_WATCHER
-    export VSX_REPO_RIPGREP VSX_REPO_MEMMAP2 VSX_REPO_PORTLIB VSX_RIPGREP_FALLBACK_TAG
 
     # Derived
     VSX_LOG_DIR="$VSX_STATE_DIR/logs"
     VSX_WORK_DIR="$VSX_CACHE_DIR/work"
     VSX_DOWNLOADS_DIR="$VSX_CACHE_DIR/downloads"
+    # Target Node runtime trees (headers + node.exp) fetched by build/aix/package_reh.sh
     VSX_NODE_CACHE_DIR="$VSX_CACHE_DIR/node"
-    VSX_MODULE_CACHE_DIR="$VSX_CACHE_DIR/modules"
     VSX_EVENTS_FILE="$VSX_STATE_DIR/events.jsonl"
     VSX_ATTEMPTS_DIR="$VSX_STATE_DIR/attempts"
-    export VSX_LOG_DIR VSX_WORK_DIR VSX_DOWNLOADS_DIR VSX_NODE_CACHE_DIR VSX_MODULE_CACHE_DIR
+    export VSX_LOG_DIR VSX_WORK_DIR VSX_DOWNLOADS_DIR VSX_NODE_CACHE_DIR
     export VSX_EVENTS_FILE VSX_ATTEMPTS_DIR
 
     mkdir -p "$VSX_STATE_DIR" "$VSX_LOG_DIR" "$VSX_WORK_DIR" "$VSX_DOWNLOADS_DIR" \
-             "$VSX_NODE_CACHE_DIR" "$VSX_MODULE_CACHE_DIR" "$VSX_ATTEMPTS_DIR" "$VSX_RELEASES_DIR"
+             "$VSX_NODE_CACHE_DIR" "$VSX_ATTEMPTS_DIR" "$VSX_RELEASES_DIR"
 }
 
 config_show() {
