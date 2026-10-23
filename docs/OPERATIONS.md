@@ -52,10 +52,9 @@ this runbook is about keeping the runner, the host and the releases healthy.
    * *patch does not apply* in `prepare_vscode.sh`: upstream changed a file
      `patches/aix` touches. Fix in the fork, push, rebuild; the fork's CI
      normally catches this the day VSCodium bumps.
-   * *addon fails to compile or load* (`npm rebuild` in `remote/`, or
-     `fix-build-tools: ... layout changed`): a dependency changed layout.
-     The fix belongs in `build/aix/fix-node-modules.sh`,
-     `fix-build-tools.sh` or their patches.
+   * *addon fails to compile or load* (`npm rebuild` in `remote/`): a
+     dependency changed layout. The fix belongs in
+     `build/aix/fix-node-modules.sh` or its patches.
    * *nodejs.org has no `aix-ppc64` build* for the Node in `remote/.npmrc`:
      wait; cron retries.
    * *ripgrep*: `cargo not found` (set `VSX_RUST_HOME` or `VSX_AIX_RIPGREP`)

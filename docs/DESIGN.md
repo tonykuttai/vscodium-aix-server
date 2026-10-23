@@ -38,7 +38,7 @@ The work is split the way VSCodium itself is split:
 
 | Repository | Holds | Analogue in VSCodium |
 |---|---|---|
-| fork `tonykuttai/vscodium`, branch `aix` | `patches/aix/*.patch` (the `aix-ppc64` gulp target, launchers, shim, one extension build fix), `build/aix/` (`package_reh.sh`, `fix-node-modules.sh`, `fix-build-tools.sh`, `ripgrep.sh`, `verify_reh.sh`, addon patches), `docs/howto-build-aix.md` | `patches/linux/`, `build/linux/package_reh.sh` |
+| fork `tonykuttai/vscodium`, branch `aix` | `patches/aix/*.patch` (the `aix-ppc64` gulp target, launchers, shim, one extension build fix, a lazy l10n-dev import for big-endian build hosts), `build/aix/` (`package_reh.sh`, `fix-node-modules.sh`, `ripgrep.sh`, `verify_reh.sh`, addon patches), `docs/howto-build-aix.md` | `patches/linux/`, `build/linux/package_reh.sh` |
 | this repository (`vsx`) | discovery of upstream versions, fork checkout, driving the build, packaging in the release layout, upload, notifications, retention, cron | `.github/workflows/stable-linux.yml` |
 
 The fork is a pure superset of upstream VSCodium: `master` mirrors
