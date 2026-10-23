@@ -31,7 +31,7 @@ events_since() {
     python3 - "$VSX_EVENTS_FILE" "$hours" <<'PY'
 import json, sys, datetime
 path, hours = sys.argv[1], float(sys.argv[2])
-cut = datetime.datetime.utcnow() - datetime.timedelta(hours=hours)
+cut = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None) - datetime.timedelta(hours=hours)
 for line in open(path):
     try:
         e = json.loads(line)
