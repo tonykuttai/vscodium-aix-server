@@ -7,6 +7,20 @@ __vsx_loaded_github=1
 
 GH_API="https://api.github.com"
 
+# gh_auth_args : prints curl arguments (one per line) that add the Authorization header through a
+# 0600 curl config file, so the token never appears in argv: on AIX every user can read every
+# command line with ps, and uploads keep curl running for minutes.
+gh_auth_args() {
+    [[ -n "${GITHUB_TOKEN:-}" ]] || return 0
+    local f="${VSX_STATE_DIR:-$HOME/.local/state/vsx}/.curl-github-auth"
+    if [[ ! -f "$f" ]] || ! grep -qF -- "$GITHUB_TOKEN" "$f" 2>/dev/null; then
+        mkdir -p "$(dirname "$f")"
+        ( umask 077; printf 'header = "Authorization: Bearer %s"\n' "$GITHUB_TOKEN" > "$f.tmp" ) && mv -f "$f.tmp" "$f"
+    fi
+    chmod 600 "$f"
+    printf -- '-K\n%s\n' "$f"
+}
+
 # gh_api METHOD PATH [JSON_BODY] : prints response body; fails on HTTP >= 400.
 gh_api() {
     local method=$1 path=$2 body=${3:-}
@@ -16,7 +30,9 @@ gh_api() {
                    -H "Accept: application/vnd.github+json"
                    -H "X-GitHub-Api-Version: 2022-11-28"
                    -w '\n%{http_code}')
-    [[ -n "${GITHUB_TOKEN:-}" ]] && args+=(-H "Authorization: Bearer $GITHUB_TOKEN")
+    local -a auth=()
+    mapfile -t auth < <(gh_auth_args)
+    (( ${#auth[@]} > 0 )) && args+=("${auth[@]}")
     [[ -n "$body" ]] && args+=(-H "Content-Type: application/json" --data-binary "$body")
     local out code
     out=$(curl "${args[@]}" "$url") || { error "curl failed for $method $url"; return 1; }
@@ -169,8 +185,9 @@ release_upload_asset() {
     esac
     info "uploading $name ($(human_size "$(file_size "$file")"))"
     local out code
-    out=$(curl -sS -L --retry 3 -X POST \
-        -H "Authorization: Bearer $GITHUB_TOKEN" \
+    local -a auth=()
+    mapfile -t auth < <(gh_auth_args)
+    out=$(curl -sS -L --retry 3 -X POST "${auth[@]}" \
         -H "Accept: application/vnd.github+json" \
         -H "Content-Type: $ctype" \
         --data-binary @"$file" \
