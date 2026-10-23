@@ -23,7 +23,6 @@ bin/vsx smoke ~/.cache/vsx/work/1.140.06880/vscodium/vscode-reh-aix-ppc64   # fo
 bin/vsx build --missing                         # what cron does
 bin/vsx upload 1.140.06880                      # publish a packaged version
 bin/vsx prune --dry-run
-bin/vsx cache export /tmp/vsx-cache.tar.gz   # move built modules + node tarballs to another host
 ```
 
 Testing changes on AIX: use a second checkout (`~/utility/vsx-dev`) with `VSX_CONFIG=~/.config/vsx/vsx-dev.conf` setting `VSX_STATE_DIR=$HOME/.local/state/vsx-dev` and `VSX_EMAIL_ENABLED/VSX_ISSUES_ENABLED/VSX_DIGEST_ENABLED=false`; always `--no-upload` until a package is verified. To test fork changes, point `VSX_FORK_REPO`/`VSX_FORK_REF` at your branch. The npm cache and the target Node runtime trees (`~/.cache/vsx/node`) are shared, so a rebuild takes ~10 minutes. To test a package with a real client, extract it to `~/.vscodium-server/bin/<commit>/` on the box (`--strip-components 1`); the extension uses an existing dir instead of downloading.

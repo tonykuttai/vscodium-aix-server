@@ -203,7 +203,11 @@ has the exact build commands for each tool.
 10. Only then: `vsx upload`, crontab. Make sure no other host still runs the
     cron job (next section).
 
-## Cut-over from cpap8104
+## Cut-over from cpap8104 (completed 2026-10-23)
+
+Done on 2026-10-23: cpap8104's `vsx-cron.sh` entry was removed (its crontab is backed up in
+`~/crontab.backup.20261022-213915` there), wyvernden6aix73 runs the runner from cron, and 1.140.06880 was
+republished from the new pipeline. The steps are kept for the next host move.
 
 `cpap8104` ran the previous pipeline (Linux tarball + transplanted modules)
 under cron until the source build was proven on `wyvernden6aix73`. Two hosts

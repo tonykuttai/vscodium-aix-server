@@ -3,7 +3,7 @@
 See CLAUDE.md for the full guidance; the points below are the ones that bite.
 
 - Runs only on AIX 7.3 ppc64 (AIX Toolbox GNU userland first in PATH). Lint off-AIX with shellcheck + bash -n only.
-- Entry point `bin/vsx`; libraries in `lib/`; one builder per native module in `modules/`; launcher templates in `templates/`; patches in `patches/`.
+- Entry point `bin/vsx`; libraries in `lib/` (`lib/source.sh` drives the source build from the VSCodium fork `tonykuttai/vscodium`, branch `aix`, whose `patches/aix/` and `build/aix/` hold all AIX build logic). No native-module builders, templates or patches live in this repository any more.
 - Bash errexit is suppressed inside `if`/`!`/`||`: builds run per version in a child process and module steps in `( set -e; ... )` subshells. Keep it.
 - AIX has small ARG_MAX, no jq/flock/pgrep and no GNU-only find/xargs flags; JSON goes through python via stdin.
 - Native modules are built at the version the downloaded server bundles, against the bundled official nodejs.org AIX Node; packages ship only after the server starts in the smoke test.

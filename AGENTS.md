@@ -7,14 +7,13 @@ detailed version is [CLAUDE.md](CLAUDE.md); keep the two in sync.
 
 ```bash
 # Lint (only thing that works off-AIX; CI runs the same)
-shellcheck -S warning -x bin/vsx lib/*.sh modules/*.sh cron/*.sh
-for f in bin/vsx lib/*.sh modules/*.sh cron/*.sh templates/*.sh; do bash -n "$f"; done
+shellcheck -S warning -x bin/vsx lib/*.sh cron/*.sh
+for f in bin/vsx lib/*.sh cron/*.sh; do bash -n "$f"; done
 
 # On the AIX build host
 bin/vsx check
 bin/vsx releases
 bin/vsx build <version> --no-upload --keep-work
-bin/vsx module <name> <version>
 bin/vsx smoke ~/.cache/vsx/work/<version>/server
 bin/vsx upload <version>
 ```
@@ -22,7 +21,7 @@ bin/vsx upload <version>
 ## Non-obvious rules
 
 - Builds run only on AIX 7.3 ppc64 with the AIX Toolbox; nothing in `bin/`,
-  `lib/`, `modules/` runs on Linux/macOS. Test in a second checkout with its
+  `lib/` runs on Linux/macOS. Test in a second checkout with its
   own `VSX_STATE_DIR` and notifications disabled, always `--no-upload` first.
 - Bash disables errexit inside `if`/`!`/`||` contexts; per-version builds run
   in a child process and module steps in `( set -e; ... )` subshells with

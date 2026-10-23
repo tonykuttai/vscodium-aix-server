@@ -71,7 +71,9 @@ upstream_latest_version() {
 }
 
 # upstream_versions_since FLOOR : all non-draft, non-prerelease upstream
-# versions > FLOOR that have a linux-x64 REH asset, ascending.
+# versions > FLOOR that have a linux-x64 REH asset, ascending. The asset is
+# used only as the "this release is complete" signal (VSCodium uploads it
+# late in its release job); the server itself is built from source.
 upstream_versions_since() {
     local floor=$1
     local rels
