@@ -39,7 +39,7 @@ fork_sync() {
         section "Cloning $VSX_FORK_REPO into $VSX_FORK_DIR"
         git clone -q "$VSX_FORK_REPO" "$VSX_FORK_DIR" || die "cannot clone $VSX_FORK_REPO"
     fi
-    git -C "$VSX_FORK_DIR" fetch -q --prune --tags origin || die "cannot fetch $VSX_FORK_REPO"
+    git -C "$VSX_FORK_DIR" fetch -q --prune --tags --force origin || die "cannot fetch $VSX_FORK_REPO"
     git -C "$VSX_FORK_DIR" worktree prune 2>/dev/null || true
 }
 
