@@ -20,4 +20,3 @@ jobs:
       - name: shellcheck
         run: |
           shellcheck -S warning -x bin/vsx lib/*.sh cron/*.sh
-          # Templates are POSIX sh and sourced with $ROOT set by the caller.

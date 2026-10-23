@@ -1,0 +1,686 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>VSCodium Remote Server for AIX</title>
+<meta name="description" content="Unofficial, source-built VSCodium Remote Extension Host for IBM AIX 7.3 on POWER, published automatically for every VSCodium release.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: product landing in the smallstep.com/open-source manner. Left-aligned hero with a
+   drawn client→ssh→server scene, a fact strip, feature cards, then one diagram per section.
+   Blue = VS Code / VSCodium parts, copper = what this project adds for AIX. */
+:root {
+  --bg: #f5f7fb;
+  --surface: #ffffff;
+  --surface-2: #eaeff6;
+  --fg: #16202e;
+  --muted: #5a6b82;
+  --line: #d6deea;
+  --accent: #1f6fe0;
+  --accent-soft: rgba(31, 111, 224, 0.10);
+  --copper: #b4601c;
+  --copper-soft: rgba(180, 96, 28, 0.13);
+  --term-bg: #10171f;
+  --term-fg: #d7e2ee;
+  --ok: #1d8a4e;
+  --font-display: "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
+  --font-body: "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "IBM Plex Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+  --radius: 10px;
+  --shadow: 0 1px 2px rgba(22, 32, 46, 0.06), 0 8px 24px rgba(22, 32, 46, 0.06);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0e141c; --surface: #151d28; --surface-2: #1c2633; --fg: #e5ecf5; --muted: #9aaabf;
+    --line: #273344; --accent: #6aa8ff; --accent-soft: rgba(106, 168, 255, 0.14);
+    --copper: #e39b5c; --copper-soft: rgba(227, 155, 92, 0.16); --term-bg: #0a0f15; --term-fg: #d7e2ee;
+    --ok: #4cc47f; --shadow: 0 1px 2px rgba(0,0,0,0.4), 0 8px 24px rgba(0,0,0,0.35);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0e141c; --surface: #151d28; --surface-2: #1c2633; --fg: #e5ecf5; --muted: #9aaabf;
+  --line: #273344; --accent: #6aa8ff; --accent-soft: rgba(106, 168, 255, 0.14);
+  --copper: #e39b5c; --copper-soft: rgba(227, 155, 92, 0.16); --term-bg: #0a0f15; --term-fg: #d7e2ee;
+  --ok: #4cc47f; --shadow: 0 1px 2px rgba(0,0,0,0.4), 0 8px 24px rgba(0,0,0,0.35);
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+html, body { overflow-x: hidden; overflow-x: clip; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } .packet { display: none; } }
+body {
+  margin: 0; background: var(--bg); color: var(--fg);
+  font: 16px/1.55 var(--font-body);
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
+code, pre, .mono { font-family: var(--font-mono); }
+code { font-size: 0.92em; background: var(--surface-2); padding: 0.1em 0.4em; border-radius: 5px; }
+h1, h2, h3 { font-family: var(--font-display); text-wrap: balance; margin: 0; line-height: 1.15; letter-spacing: -0.01em; }
+h1 { font-size: clamp(2rem, 4.6vw, 3.25rem); font-weight: 700; }
+h2 { font-size: clamp(1.5rem, 2.8vw, 2.1rem); font-weight: 600; }
+h3 { font-size: 1.05rem; font-weight: 600; }
+p { margin: 0; }
+.wrap { max-width: 1120px; margin-inline: auto; padding-inline: clamp(16px, 4vw, 40px); }
+.lead { color: var(--muted); font-size: 1.1rem; max-width: 36em; }
+.eyebrow { font-size: 0.78rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--copper); }
+.muted { color: var(--muted); }
+.small { font-size: 0.9rem; }
+
+/* nav */
+.nav { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 10; background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(10px); border-bottom: 1px solid var(--line); }
+.nav .wrap { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 60px; }
+.brand { display: flex; align-items: center; gap: 10px; color: var(--fg); font-weight: 600; font-family: var(--font-display); }
+.brand svg { width: 28px; height: 28px; flex: none; }
+.nav-links { display: flex; gap: 22px; flex-wrap: wrap; font-size: 0.95rem; }
+.nav-links a { color: var(--fg); }
+.nav-links a.gh { color: var(--muted); }
+@media (max-width: 720px) { .nav-links a:not(.gh) { display: none; } }
+
+/* hero */
+.hero { padding-block: clamp(40px, 7vw, 88px) clamp(32px, 5vw, 56px); }
+.hero .wrap { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); gap: clamp(24px, 4vw, 56px); align-items: center; }
+@media (max-width: 860px) { .hero .wrap { grid-template-columns: 1fr; } }
+.hero-copy { display: grid; gap: 20px; }
+.badges { display: flex; flex-wrap: wrap; gap: 8px; }
+.badge { font-size: 0.8rem; font-weight: 500; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); color: var(--muted); }
+.badge.copper { color: var(--copper); border-color: color-mix(in srgb, var(--copper) 40%, transparent); background: var(--copper-soft); }
+.cta { display: flex; flex-wrap: wrap; gap: 12px; }
+.btn { display: inline-flex; align-items: center; gap: 8px; padding: 11px 18px; border-radius: 8px; font-weight: 600; font-size: 0.95rem; border: 1px solid transparent; }
+.btn.primary { background: var(--accent); color: #fff; }
+.btn.primary:hover { text-decoration: none; filter: brightness(1.08); }
+.btn.ghost { border-color: var(--line); color: var(--fg); background: var(--surface); }
+.btn.ghost:hover { text-decoration: none; border-color: var(--accent); }
+.hero-art { min-width: 0; }
+.hero-art svg { width: 100%; height: auto; display: block; }
+
+/* fact strip */
+.facts { border-block: 1px solid var(--line); background: var(--surface); }
+.facts .wrap { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 0; }
+.fact { padding: 18px 12px; border-left: 1px solid var(--line); min-width: 0; }
+.fact:first-child { border-left: 0; padding-left: 0; }
+.fact b { display: block; font-family: var(--font-display); font-weight: 600; font-size: 1.05rem; font-variant-numeric: tabular-nums; }
+.fact span { color: var(--muted); font-size: 0.8rem; }
+@media (max-width: 860px) { .facts .wrap { grid-template-columns: repeat(3, 1fr); } .fact { border-left: 0; padding-left: 0; } }
+
+/* sections */
+section { padding-block: clamp(48px, 7vw, 88px); }
+section.alt { background: var(--surface); border-block: 1px solid var(--line); }
+.sec-head { display: grid; gap: 10px; max-width: 42em; margin-bottom: clamp(24px, 4vw, 40px); }
+.grid { display: grid; gap: 18px; }
+.grid.c3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.grid.c2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+@media (max-width: 900px) { .grid.c3 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 600px) { .grid.c3, .grid.c2 { grid-template-columns: 1fr; } }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 22px; display: grid; gap: 10px; align-content: start; min-width: 0; }
+section.alt .card { background: var(--bg); }
+.card .icon { width: 40px; height: 40px; border-radius: 9px; background: var(--accent-soft); color: var(--accent); display: grid; place-items: center; }
+.card .icon.copper { background: var(--copper-soft); color: var(--copper); }
+.card .icon svg { width: 22px; height: 22px; }
+.card p { color: var(--muted); font-size: 0.95rem; }
+
+/* figures */
+figure { margin: 0; display: grid; gap: 12px; min-width: 0; }
+figure.wide .scroller { overflow-x: auto; min-width: 0; -webkit-overflow-scrolling: touch; }
+figure.wide .scroller svg { min-width: 760px; }
+figure svg { width: 100%; height: auto; display: block; color: var(--fg); }
+figcaption { color: var(--muted); font-size: 0.9rem; max-width: 60em; }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: clamp(14px, 2.5vw, 28px); box-shadow: var(--shadow); min-width: 0; }
+section.alt .panel { background: var(--bg); box-shadow: none; }
+.legend { display: flex; flex-wrap: wrap; gap: 16px; font-size: 0.85rem; color: var(--muted); }
+.legend i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: -1px; margin-right: 6px; border: 1px solid; }
+.legend i.blue { background: var(--accent-soft); border-color: var(--accent); }
+.legend i.copper { background: var(--copper-soft); border-color: var(--copper); }
+
+/* install */
+.steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 14px; counter-reset: s; }
+.steps li { display: grid; grid-template-columns: 28px 1fr; gap: 12px; align-items: start; }
+.steps li::before { counter-increment: s; content: counter(s); width: 28px; height: 28px; border-radius: 50%; background: var(--accent); color: #fff; font-weight: 600; font-size: 0.85rem; display: grid; place-items: center; }
+.steps p { color: var(--muted); font-size: 0.95rem; }
+pre.term { margin: 0; background: var(--term-bg); color: var(--term-fg); border-radius: 8px; padding: 16px 18px; font-size: 0.82rem; line-height: 1.6; overflow-x: auto; position: relative; }
+pre.term .c { color: #7f93a8; }
+pre.term .p { color: #6aa8ff; user-select: none; }
+.copy { position: absolute; top: 10px; right: 10px; font: 500 0.75rem var(--font-body); color: var(--term-fg); background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15); border-radius: 6px; padding: 4px 9px; cursor: pointer; }
+.copy:hover { background: rgba(255,255,255,0.14); }
+.reqs { display: flex; flex-wrap: wrap; gap: 8px; }
+.reqs .badge { background: var(--bg); }
+section.alt .reqs .badge { background: var(--surface); }
+
+/* limits + footer */
+.limits { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 18px; }
+@media (max-width: 900px) { .limits { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 560px) { .limits { grid-template-columns: 1fr; } }
+.limit { display: grid; gap: 6px; padding-left: 14px; border-left: 3px solid var(--copper); }
+.limit b { font-weight: 600; }
+.limit span { color: var(--muted); font-size: 0.92rem; }
+footer { border-top: 1px solid var(--line); padding-block: 32px 48px; color: var(--muted); font-size: 0.88rem; }
+footer .wrap { display: grid; gap: 14px; }
+footer .links { display: flex; flex-wrap: wrap; gap: 18px; }
+</style>
+</head>
+<body>
+
+<nav class="nav" aria-label="Site">
+  <div class="wrap">
+    <a class="brand" href="#top" aria-label="VSCodium Remote Server for AIX, top of page">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><rect x="2" y="2" width="28" height="28" rx="7" fill="var(--accent)"/><path d="M9 11l5 5-5 5" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/><path d="M16 21h7" stroke="#fff" stroke-width="2.4" stroke-linecap="round"/></svg>
+      <span>VSCodium Remote Server for AIX</span>
+    </a>
+    <div class="nav-links">
+      <a href="#features">Features</a>
+      <a href="#pipeline">How it is built</a>
+      <a href="#inside">Inside</a>
+      <a href="#install">Install</a>
+      <a href="#contribute">Contribute</a>
+      <a class="gh" href="https://github.com/tonykuttai/vscodium-aix-server">GitHub ↗</a>
+    </div>
+  </div>
+</nav>
+
+<header class="hero" id="top">
+  <div class="wrap">
+    <div class="hero-copy">
+      <div class="badges">
+        <span class="badge copper">Unofficial community build</span>
+        <span class="badge">IBM AIX 7.3 · POWER ppc64</span>
+        <span class="badge">MIT</span>
+      </div>
+      <h1>Open your AIX machines in VSCodium, over SSH.</h1>
+      <p class="lead">The VSCodium Remote Extension Host, built from source on AIX with VS Code's own build pipeline, and published automatically for every VSCodium release. No root, no Node install, one tarball.</p>
+      <div class="cta">
+        <a class="btn primary" href="https://github.com/tonykuttai/vscodium-aix-server/releases/latest">Latest release</a>
+        <a class="btn ghost" href="#install">How to install</a>
+        <a class="btn ghost" href="https://github.com/tonykuttai/vscodium">The VSCodium fork</a>
+      </div>
+    </div>
+
+    <figure class="hero-art">
+      <svg viewBox="0 0 540 300" role="img" aria-label="A VSCodium desktop connects over SSH to a Remote Extension Host running on an AIX POWER server; the server answers with its version.">
+        <defs>
+          <marker id="h-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0L10 5 0 10z" fill="currentColor"/></marker>
+        </defs>
+        <!-- laptop -->
+        <rect x="22" y="48" width="188" height="122" rx="8" fill="var(--surface)" stroke="currentColor" stroke-width="1.6"/>
+        <rect x="32" y="58" width="168" height="102" rx="4" fill="var(--surface-2)"/>
+        <rect x="32" y="58" width="168" height="14" rx="4" fill="var(--accent)" opacity="0.9"/>
+        <circle cx="40" cy="65" r="2.2" fill="#fff" opacity="0.9"/><circle cx="48" cy="65" r="2.2" fill="#fff" opacity="0.9"/><circle cx="56" cy="65" r="2.2" fill="#fff" opacity="0.9"/>
+        <rect x="32" y="72" width="26" height="88" fill="var(--accent-soft)"/>
+        <rect x="66" y="82" width="70" height="4" rx="2" fill="var(--accent)" opacity="0.8"/>
+        <rect x="66" y="92" width="110" height="4" rx="2" fill="currentColor" opacity="0.35"/>
+        <rect x="76" y="102" width="92" height="4" rx="2" fill="currentColor" opacity="0.35"/>
+        <rect x="76" y="112" width="60" height="4" rx="2" fill="var(--copper)" opacity="0.8"/>
+        <rect x="66" y="122" width="100" height="4" rx="2" fill="currentColor" opacity="0.35"/>
+        <rect x="66" y="132" width="80" height="4" rx="2" fill="currentColor" opacity="0.35"/>
+        <rect x="32" y="146" width="168" height="14" fill="var(--accent)" opacity="0.9"/>
+        <text x="40" y="156" font-size="8" fill="#fff" font-family="var(--font-mono)">SSH: aix-host</text>
+        <path d="M6 176h220l-10 12H16z" fill="var(--surface-2)" stroke="currentColor" stroke-width="1.4"/>
+        <text x="116" y="212" font-size="12" text-anchor="middle" fill="currentColor" font-weight="600">VSCodium desktop</text>
+        <text x="116" y="228" font-size="11" text-anchor="middle" fill="var(--muted)">+ open-remote-ssh (AIX fork)</text>
+
+        <!-- ssh link -->
+        <line x1="212" y1="108" x2="322" y2="108" stroke="currentColor" stroke-width="1.6" stroke-dasharray="6 5" marker-end="url(#h-arrow)"/>
+        <line x1="322" y1="128" x2="212" y2="128" stroke="currentColor" stroke-width="1.6" stroke-dasharray="6 5" marker-end="url(#h-arrow)"/>
+        <rect x="252" y="80" width="30" height="20" rx="4" fill="var(--surface)" stroke="currentColor" stroke-width="1.2"/>
+        <path d="M261 80v-5a6 6 0 0 1 12 0v5" fill="none" stroke="currentColor" stroke-width="1.4"/>
+        <text x="267" y="94" font-size="9" text-anchor="middle" fill="currentColor" font-family="var(--font-mono)">ssh</text>
+        <circle class="packet" cy="108" r="3.5" fill="var(--accent)"><animate attributeName="cx" from="214" to="316" dur="2.6s" repeatCount="indefinite"/></circle>
+        <text x="267" y="150" font-size="10" text-anchor="middle" fill="var(--muted)">downloads the server once</text>
+
+        <!-- server -->
+        <rect x="334" y="34" width="150" height="160" rx="8" fill="var(--surface)" stroke="currentColor" stroke-width="1.6"/>
+        <g fill="var(--surface-2)" stroke="currentColor" stroke-width="1">
+          <rect x="346" y="48" width="126" height="22" rx="3"/><rect x="346" y="76" width="126" height="22" rx="3"/>
+          <rect x="346" y="104" width="126" height="22" rx="3"/><rect x="346" y="132" width="126" height="22" rx="3"/>
+        </g>
+        <g fill="var(--ok)"><circle cx="458" cy="59" r="3"/><circle cx="458" cy="87" r="3"/><circle cx="458" cy="115" r="3"/><circle cx="458" cy="143" r="3"/></g>
+        <g fill="currentColor" opacity="0.3"><rect x="354" y="57" width="60" height="4" rx="2"/><rect x="354" y="85" width="60" height="4" rx="2"/><rect x="354" y="113" width="60" height="4" rx="2"/><rect x="354" y="141" width="60" height="4" rx="2"/></g>
+        <rect x="346" y="162" width="126" height="20" rx="3" fill="var(--copper-soft)" stroke="var(--copper)" stroke-width="1"/>
+        <text x="409" y="176" font-size="9.5" text-anchor="middle" fill="var(--copper)" font-weight="600">codium-server (REH)</text>
+        <text x="409" y="214" font-size="12" text-anchor="middle" fill="currentColor" font-weight="600">AIX 7.3 on POWER</text>
+        <text x="409" y="230" font-size="11" text-anchor="middle" fill="var(--muted)">~/.vscodium-server/bin/&lt;commit&gt;</text>
+
+        <!-- terminal -->
+        <rect x="300" y="244" width="232" height="50" rx="6" fill="var(--term-bg)"/>
+        <text x="310" y="262" font-size="9.5" font-family="var(--font-mono)" fill="#d7e2ee"><tspan fill="#6aa8ff">$</tspan> bin/codium-server --version</text>
+        <text x="310" y="280" font-size="9.5" font-family="var(--font-mono)" fill="#d7e2ee">1.140.06880  <tspan fill="#7f93a8">807ba2d6…</tspan></text>
+      </svg>
+    </figure>
+  </div>
+</header>
+
+<div class="facts" aria-label="Key facts">
+  <div class="wrap">
+    <div class="fact"><b>AIX 7.3</b><span>target OS, 64-bit kernel</span></div>
+    <div class="fact"><b>POWER ppc64</b><span>big-endian, built natively</span></div>
+    <div class="fact"><b>Node 24 bundled</b><span>nothing to install on the host</span></div>
+    <div class="fact"><b>Every release</b><span>tracks VSCodium, same version tag</span></div>
+    <div class="fact"><b>~107 MB</b><span>one tarball, one directory</span></div>
+    <div class="fact"><b>No root</b><span>installs under your home</span></div>
+  </div>
+</div>
+
+<section id="features">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="eyebrow">What works</span>
+      <h2>A full remote editing session on AIX</h2>
+      <p class="lead">Everything the Linux server does, built for AIX from the same sources.</p>
+    </div>
+    <div class="grid c3">
+      <div class="card">
+        <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"/></svg></div>
+        <h3>Bundled Node runtime</h3>
+        <p>The official nodejs.org build for aix-ppc64, the exact version VS Code targets. Only the AIX Toolbox GCC runtime is needed.</p>
+      </div>
+      <div class="card">
+        <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9l3 3-3 3M12 15h5"/></svg></div>
+        <h3>Integrated terminals</h3>
+        <p>node-pty compiled on AIX with a small patch, so terminals, tasks and the remote CLI open real ptys on the host.</p>
+      </div>
+      <div class="card">
+        <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg></div>
+        <h3>Fast search</h3>
+        <p>ripgrep built from source for AIX, with PCRE2, at the exact tag VS Code pins. Find-in-files and quick open work as on Linux.</p>
+      </div>
+      <div class="card">
+        <div class="icon copper"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></div>
+        <h3>Safe file watching</h3>
+        <p>Polling watchers keep the server away from AHAFS, the AIX kernel file-event system that can wedge a whole machine. Edits show up within a second or two.</p>
+      </div>
+      <div class="card">
+        <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h5a2 2 0 1 0 4 0h7v12H4z"/><path d="M4 8V5h7"/></svg></div>
+        <h3>Extensions and Git</h3>
+        <p>The extension host runs on AIX, so language servers, Git and the built-in extensions run next to your code.</p>
+      </div>
+      <div class="card">
+        <div class="icon copper"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M8.5 12l2.5 2.5 4.5-5"/></svg></div>
+        <h3>Verifiable builds</h3>
+        <p>Every package carries a manifest naming the VS Code commit, the fork tag and every native module version, plus a SHA256 on the release page.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="alt" id="pipeline">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="eyebrow">How it is built</span>
+      <h2>An AIX host does what GitHub Actions does for VSCodium</h2>
+      <p class="lead">VSCodium cannot build AIX in its CI, so a runner on an AIX 7.3 box watches for releases and builds them with VSCodium's own scripts.</p>
+    </div>
+
+    <figure class="wide panel">
+      <div class="scroller">
+      <svg viewBox="0 0 1040 300" role="img" aria-label="Pipeline: watch VSCodium releases, check out the fork, prepare, build with gulp, verify, package, publish; failures email and open an issue, successes publish a release.">
+        <defs><marker id="p-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5 0 10z" fill="currentColor"/></marker></defs>
+        <!-- brackets above -->
+        <g stroke="var(--muted)" stroke-width="1" fill="none">
+          <path d="M40 78v-8h120v8"/>
+          <path d="M320 78v-8h400v8"/>
+        </g>
+        <text x="100" y="60" font-size="11" text-anchor="middle" fill="var(--muted)">cron, every 4 h</text>
+        <text x="520" y="60" font-size="11" text-anchor="middle" fill="var(--muted)">VSCodium's get_repo.sh · prepare_vscode.sh · the fork's build/aix/</text>
+        <text x="520" y="32" font-size="12" text-anchor="middle" fill="currentColor" font-weight="600">on wyvernden6aix73 (AIX 7.3, no root)</text>
+
+        <!-- stage boxes -->
+        <g font-family="var(--font-body)">
+          <g>
+            <rect x="40" y="100" width="120" height="70" rx="8" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.4"/>
+            <text x="100" y="128" font-size="13" text-anchor="middle" fill="currentColor" font-weight="600">Watch</text>
+            <text x="100" y="146" font-size="10.5" text-anchor="middle" fill="var(--muted)">VSCodium releases</text>
+            <text x="100" y="159" font-size="10.5" text-anchor="middle" fill="var(--muted)">not yet published</text>
+          </g>
+          <g>
+            <rect x="180" y="100" width="120" height="70" rx="8" fill="var(--copper-soft)" stroke="var(--copper)" stroke-width="1.4"/>
+            <text x="240" y="128" font-size="13" text-anchor="middle" fill="currentColor" font-weight="600">Check out</text>
+            <text x="240" y="146" font-size="10.5" text-anchor="middle" fill="var(--muted)">fork tag aix/&lt;version&gt;</text>
+            <text x="240" y="159" font-size="10.5" text-anchor="middle" fill="var(--muted)">as a git worktree</text>
+          </g>
+          <g>
+            <rect x="320" y="100" width="120" height="70" rx="8" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.4"/>
+            <text x="380" y="128" font-size="13" text-anchor="middle" fill="currentColor" font-weight="600">Prepare</text>
+            <text x="380" y="146" font-size="10.5" text-anchor="middle" fill="var(--muted)">VS Code at the pinned</text>
+            <text x="380" y="159" font-size="10.5" text-anchor="middle" fill="var(--muted)">commit + all patches</text>
+          </g>
+          <g>
+            <rect x="460" y="100" width="120" height="70" rx="8" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.4"/>
+            <text x="520" y="128" font-size="13" text-anchor="middle" fill="currentColor" font-weight="600">Build</text>
+            <text x="520" y="146" font-size="10.5" text-anchor="middle" fill="var(--muted)" font-family="var(--font-mono)">gulp vscode-reh-</text>
+            <text x="520" y="159" font-size="10.5" text-anchor="middle" fill="var(--muted)" font-family="var(--font-mono)">aix-ppc64-min</text>
+          </g>
+          <g>
+            <rect x="600" y="100" width="120" height="70" rx="8" fill="var(--copper-soft)" stroke="var(--copper)" stroke-width="1.4"/>
+            <text x="660" y="128" font-size="13" text-anchor="middle" fill="currentColor" font-weight="600">Verify</text>
+            <text x="660" y="146" font-size="10.5" text-anchor="middle" fill="var(--muted)">addons load, watcher,</text>
+            <text x="660" y="159" font-size="10.5" text-anchor="middle" fill="var(--muted)">rg, server boots</text>
+          </g>
+          <g>
+            <rect x="740" y="100" width="120" height="70" rx="8" fill="var(--surface)" stroke="currentColor" stroke-width="1.4"/>
+            <text x="800" y="128" font-size="13" text-anchor="middle" fill="currentColor" font-weight="600">Package</text>
+            <text x="800" y="146" font-size="10.5" text-anchor="middle" fill="var(--muted)">tarball, manifest,</text>
+            <text x="800" y="159" font-size="10.5" text-anchor="middle" fill="var(--muted)">checksums</text>
+          </g>
+          <g>
+            <rect x="880" y="100" width="120" height="70" rx="8" fill="var(--surface)" stroke="currentColor" stroke-width="1.4"/>
+            <text x="940" y="128" font-size="13" text-anchor="middle" fill="currentColor" font-weight="600">Publish</text>
+            <text x="940" y="146" font-size="10.5" text-anchor="middle" fill="var(--muted)">GitHub release,</text>
+            <text x="940" y="159" font-size="10.5" text-anchor="middle" fill="var(--muted)">tag = version</text>
+          </g>
+        </g>
+        <g stroke="currentColor" stroke-width="1.4" marker-end="url(#p-arrow)">
+          <line x1="160" y1="135" x2="178" y2="135"/><line x1="300" y1="135" x2="318" y2="135"/><line x1="440" y1="135" x2="458" y2="135"/>
+          <line x1="580" y1="135" x2="598" y2="135"/><line x1="720" y1="135" x2="738" y2="135"/><line x1="860" y1="135" x2="878" y2="135"/>
+        </g>
+
+        <!-- timing -->
+        <text x="520" y="192" font-size="11" text-anchor="middle" fill="var(--muted)">about 10 minutes with a warm cache</text>
+
+        <!-- outcomes -->
+        <path d="M660 170v42" fill="none" stroke="var(--copper)" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#p-arrow)"/>
+        <rect x="300" y="214" width="380" height="28" rx="6" fill="var(--copper-soft)" stroke="var(--copper)" stroke-width="1"/>
+        <text x="490" y="233" font-size="11" text-anchor="middle" fill="currentColor">fails → email + GitHub issue, closed again on the next success</text>
+        <path d="M940 170v42" fill="none" stroke="var(--ok)" stroke-width="1.4" marker-end="url(#p-arrow)"/>
+        <rect x="700" y="214" width="320" height="28" rx="6" fill="var(--surface)" stroke="var(--ok)" stroke-width="1"/>
+        <text x="860" y="233" font-size="11" text-anchor="middle" fill="currentColor">passes → tarball + checksums on the release page</text>
+        <text x="520" y="278" font-size="11" text-anchor="middle" fill="var(--muted)">A daily digest says the pipeline is alive even when nothing was built. Builds that were published are tagged aix/&lt;version&gt; in the fork.</text>
+      </svg>
+      </div>
+      <figcaption>Every stage uses VSCodium's or VS Code's own scripts; the AIX pieces (copper) are the fork checkout and the smoke test gate. Nothing is published that has not started and answered on the build host.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<section id="split">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="eyebrow">Two repositories, one job</span>
+      <h2>The fork holds what could go upstream. The runner holds the rest.</h2>
+    </div>
+    <figure class="wide panel">
+      <div class="scroller">
+      <svg viewBox="0 0 1000 250" role="img" aria-label="Upstream VSCodium is mirrored into a fork whose aix branch adds patches and build scripts; the vsx runner builds from the fork and publishes releases; the open-remote-ssh AIX fork installs them for the VSCodium desktop.">
+        <defs><marker id="s-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5 0 10z" fill="currentColor"/></marker></defs>
+        <g font-family="var(--font-body)">
+          <rect x="20" y="70" width="150" height="80" rx="8" fill="var(--surface)" stroke="currentColor" stroke-width="1.4"/>
+          <text x="95" y="98" font-size="12.5" text-anchor="middle" font-weight="600" fill="currentColor">VSCodium</text>
+          <text x="95" y="116" font-size="10.5" text-anchor="middle" fill="var(--muted)">upstream, every release</text>
+          <text x="95" y="131" font-size="10.5" text-anchor="middle" fill="var(--muted)" font-family="var(--font-mono)">upstream/stable.json</text>
+
+          <rect x="210" y="70" width="170" height="80" rx="8" fill="var(--copper-soft)" stroke="var(--copper)" stroke-width="1.4"/>
+          <text x="295" y="98" font-size="12.5" text-anchor="middle" font-weight="600" fill="currentColor">Fork, branch aix</text>
+          <text x="295" y="116" font-size="10.5" text-anchor="middle" fill="var(--muted)" font-family="var(--font-mono)">patches/aix/  build/aix/</text>
+          <text x="295" y="131" font-size="10.5" text-anchor="middle" fill="var(--muted)">docs/howto-build-aix.md</text>
+
+          <rect x="420" y="70" width="170" height="80" rx="8" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.4"/>
+          <text x="505" y="98" font-size="12.5" text-anchor="middle" font-weight="600" fill="currentColor">vsx runner</text>
+          <text x="505" y="116" font-size="10.5" text-anchor="middle" fill="var(--muted)">discover · drive the build</text>
+          <text x="505" y="131" font-size="10.5" text-anchor="middle" fill="var(--muted)">package · publish · notify</text>
+
+          <rect x="630" y="70" width="150" height="80" rx="8" fill="var(--surface)" stroke="currentColor" stroke-width="1.4"/>
+          <text x="705" y="98" font-size="12.5" text-anchor="middle" font-weight="600" fill="currentColor">GitHub Releases</text>
+          <text x="705" y="116" font-size="10.5" text-anchor="middle" fill="var(--muted)">tag = VSCodium version</text>
+          <text x="705" y="131" font-size="10.5" text-anchor="middle" fill="var(--muted)">/releases/latest fallback</text>
+
+          <rect x="820" y="70" width="160" height="80" rx="8" fill="var(--surface)" stroke="currentColor" stroke-width="1.4"/>
+          <text x="900" y="98" font-size="12.5" text-anchor="middle" font-weight="600" fill="currentColor">open-remote-ssh</text>
+          <text x="900" y="116" font-size="10.5" text-anchor="middle" fill="var(--muted)">AIX fork of the extension</text>
+          <text x="900" y="131" font-size="10.5" text-anchor="middle" fill="var(--muted)">installs on connect</text>
+        </g>
+        <g stroke="currentColor" stroke-width="1.4" marker-end="url(#s-arrow)">
+          <line x1="170" y1="110" x2="208" y2="110"/><line x1="380" y1="110" x2="418" y2="110"/>
+          <line x1="590" y1="110" x2="628" y2="110"/><line x1="780" y1="110" x2="818" y2="110"/>
+        </g>
+        <g font-size="10" fill="var(--muted)" text-anchor="middle">
+          <text x="189" y="60">mirror master,</text><text x="189" y="166">rebase aix</text>
+          <text x="399" y="60">worktree at</text><text x="399" y="166">tag aix/&lt;v&gt;</text>
+          <text x="609" y="60">upload</text><text x="609" y="166">+ manifest</text>
+          <text x="799" y="60">download by</text><text x="799" y="166">exact version</text>
+        </g>
+        <g stroke="var(--muted)" stroke-width="1" fill="none">
+          <path d="M210 190v8h170v-8"/><path d="M420 190v8h170v-8"/>
+        </g>
+        <text x="295" y="222" font-size="11" text-anchor="middle" fill="var(--copper)" font-weight="600">upstream candidate: a pure superset of VSCodium</text>
+        <text x="505" y="222" font-size="11" text-anchor="middle" fill="var(--accent)" font-weight="600">AIX-only, carries no build logic</text>
+        <text x="500" y="244" font-size="10.5" text-anchor="middle" fill="var(--muted)">If VSCodium ever accepts the aix target, the fork shrinks to nothing and the runner keeps working unchanged.</text>
+      </svg>
+      </div>
+      <figcaption>The split mirrors VSCodium itself: patches and package scripts per OS live in the fork, the thing that watches releases and uploads lives in the runner.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<section class="alt" id="inside">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="eyebrow">Inside the package</span>
+      <h2>Upstream server, plus a thin AIX layer</h2>
+      <p class="lead">VS Code's source is not patched. The AIX work sits in the build target, the native modules and two small files that travel with the server.</p>
+    </div>
+    <div class="grid c2">
+      <figure class="panel">
+        <svg viewBox="0 0 560 330" role="img" aria-label="Stack from top to bottom: VS Code server processes; the aix-platform-override preload; native modules built on AIX; bundled Node 24 and the GCC runtime; AIX 7.3 on POWER. AHAFS is never used.">
+          <g font-family="var(--font-body)">
+            <rect x="20" y="16" width="520" height="54" rx="7" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.3"/>
+            <text x="34" y="38" font-size="12.5" font-weight="600" fill="currentColor">VS Code server, unmodified source</text>
+            <text x="34" y="56" font-size="10.5" fill="var(--muted)">server-main · extension host · pty host · file watcher · remote CLI</text>
+            <text x="526" y="38" font-size="10" text-anchor="end" fill="var(--accent)">from upstream</text>
+
+            <rect x="20" y="80" width="520" height="54" rx="7" fill="var(--copper-soft)" stroke="var(--copper)" stroke-width="1.3"/>
+            <text x="34" y="102" font-size="12.5" font-weight="600" fill="currentColor" font-family="var(--font-mono)">aix-platform-override.cjs</text>
+            <text x="34" y="120" font-size="10.5" fill="var(--muted)">preloaded in every process: fs.watch → stat polling · platform = linux for 4 entry points</text>
+            <text x="526" y="102" font-size="10" text-anchor="end" fill="var(--copper)">added for AIX</text>
+
+            <rect x="20" y="144" width="520" height="54" rx="7" fill="var(--copper-soft)" stroke="var(--copper)" stroke-width="1.3"/>
+            <text x="34" y="166" font-size="12.5" font-weight="600" fill="currentColor">Native modules compiled on AIX</text>
+            <text x="34" y="184" font-size="10.5" fill="var(--muted)">node-pty + libutil · @parcel/watcher (polling) · kerberos · sqlite3 · spdlog · watchdog · ripgrep</text>
+            <text x="526" y="166" font-size="10" text-anchor="end" fill="var(--copper)">same versions as upstream</text>
+
+            <rect x="20" y="208" width="520" height="54" rx="7" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.3"/>
+            <text x="34" y="230" font-size="12.5" font-weight="600" fill="currentColor">Node 24.21.0 for aix-ppc64, bundled</text>
+            <text x="34" y="248" font-size="10.5" fill="var(--muted)">nodejs.org build · GCC runtime found by bin/aix-env.sh (LIBPATH)</text>
+            <text x="526" y="230" font-size="10" text-anchor="end" fill="var(--accent)">fetched by gulp</text>
+
+            <rect x="20" y="272" width="520" height="44" rx="7" fill="var(--surface)" stroke="currentColor" stroke-width="1.3"/>
+            <text x="34" y="299" font-size="12.5" font-weight="600" fill="currentColor">AIX 7.3 · POWER ppc64</text>
+            <text x="526" y="299" font-size="10.5" text-anchor="end" fill="var(--muted)">AHAFS (/aha) is never touched</text>
+          </g>
+        </svg>
+        <figcaption>Blue layers come from upstream as they are. Copper layers are the AIX work: one preload file and the native modules, rebuilt with node-gyp against the bundled Node.</figcaption>
+      </figure>
+
+      <figure class="panel">
+        <svg viewBox="0 0 560 330" role="img" aria-label="Contents of the tarball: one top-level directory named after the VS Code commit, holding node, launchers, the AIX preload, server JS, extensions, native modules and a build manifest.">
+          <g font-family="var(--font-mono)" font-size="11.5" fill="currentColor">
+            <text x="20" y="30" font-weight="600">vscodium-reh-aix-ppc64-1.140.06880.tar.gz</text>
+            <text x="40" y="58" font-weight="600">807ba2d6…/</text>
+            <text x="150" y="58" font-size="10.5" fill="var(--muted)" font-family="var(--font-body)">one directory, named by the VS Code commit</text>
+            <line x1="46" y1="66" x2="46" y2="296" stroke="var(--muted)" stroke-width="1"/>
+            <g stroke="var(--muted)" stroke-width="1">
+              <line x1="46" y1="86" x2="60" y2="86"/><line x1="46" y1="116" x2="60" y2="116"/><line x1="46" y1="146" x2="60" y2="146"/>
+              <line x1="46" y1="176" x2="60" y2="176"/><line x1="46" y1="206" x2="60" y2="206"/><line x1="46" y1="236" x2="60" y2="236"/>
+              <line x1="46" y1="266" x2="60" y2="266"/><line x1="46" y1="296" x2="60" y2="296"/>
+            </g>
+            <text x="68" y="90">node</text>
+            <text x="68" y="120">bin/codium-server</text>
+            <text x="68" y="150">bin/aix-env.sh</text>
+            <text x="68" y="180">aix-platform-override.cjs</text>
+            <text x="68" y="210">out/  extensions/</text>
+            <text x="68" y="240">node_modules/</text>
+            <text x="68" y="270">node_modules/@vscode/ripgrep-universal/bin/aix-ppc64/rg</text>
+            <text x="68" y="300">aix-build-manifest.json</text>
+          </g>
+          <g font-family="var(--font-body)" font-size="10" text-anchor="middle">
+            <rect x="440" y="76" width="100" height="18" rx="9" fill="var(--accent-soft)" stroke="var(--accent)"/><text x="490" y="89" fill="var(--accent)">Node 24.21.0</text>
+            <rect x="440" y="106" width="100" height="18" rx="9" fill="var(--copper-soft)" stroke="var(--copper)"/><text x="490" y="119" fill="var(--copper)">AIX launcher</text>
+            <rect x="440" y="136" width="100" height="18" rx="9" fill="var(--copper-soft)" stroke="var(--copper)"/><text x="490" y="149" fill="var(--copper)">LIBPATH + preload</text>
+            <rect x="440" y="166" width="100" height="18" rx="9" fill="var(--copper-soft)" stroke="var(--copper)"/><text x="490" y="179" fill="var(--copper)">polling shim</text>
+            <rect x="440" y="196" width="100" height="18" rx="9" fill="var(--accent-soft)" stroke="var(--accent)"/><text x="490" y="209" fill="var(--accent)">server + built-ins</text>
+            <rect x="440" y="226" width="100" height="18" rx="9" fill="var(--copper-soft)" stroke="var(--copper)"/><text x="490" y="239" fill="var(--copper)">built on AIX</text>
+            <rect x="440" y="286" width="100" height="18" rx="9" fill="var(--copper-soft)" stroke="var(--copper)"/><text x="490" y="299" fill="var(--copper)">what went in</text>
+          </g>
+        </svg>
+        <figcaption>The archive is the standard REH layout the extension expects, with the AIX files beside it. The manifest lists every module version, the toolchain and the fork commit.</figcaption>
+      </figure>
+    </div>
+  </div>
+</section>
+
+<section id="versions">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="eyebrow">Versions</span>
+      <h2>One VSCodium version, three names that must agree</h2>
+    </div>
+    <figure class="wide panel">
+      <div class="scroller">
+      <svg viewBox="0 0 1000 210" role="img" aria-label="VSCodium release 1.140.06880 corresponds to VS Code tag 1.140.0 at commit 07f806f9 and to fork tag aix/1.140.06880 at commit e818874; the AIX release uses the VSCodium version as its tag and asset name.">
+        <defs><marker id="v-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5 0 10z" fill="currentColor"/></marker></defs>
+        <g font-family="var(--font-body)">
+          <rect x="30" y="40" width="280" height="96" rx="8" fill="var(--surface)" stroke="currentColor" stroke-width="1.4"/>
+          <text x="170" y="64" font-size="11" text-anchor="middle" fill="var(--muted)">VSCodium release and this project's tag</text>
+          <text x="170" y="92" font-size="20" text-anchor="middle" font-weight="600" fill="currentColor" font-family="var(--font-mono)">1.140.0<tspan fill="var(--accent)">6880</tspan></text>
+          <text x="170" y="118" font-size="10.5" text-anchor="middle" fill="var(--muted)" font-family="var(--font-mono)">vscodium-reh-aix-ppc64-1.140.06880.tar.gz</text>
+
+          <rect x="360" y="40" width="280" height="96" rx="8" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.4"/>
+          <text x="500" y="64" font-size="11" text-anchor="middle" fill="var(--muted)">VS Code tag and commit, from upstream/stable.json</text>
+          <text x="500" y="92" font-size="20" text-anchor="middle" font-weight="600" fill="currentColor" font-family="var(--font-mono)">1.140.0</text>
+          <text x="500" y="118" font-size="10.5" text-anchor="middle" fill="var(--muted)" font-family="var(--font-mono)">07f806f9…  → server dir 807ba2d6…</text>
+
+          <rect x="690" y="40" width="280" height="96" rx="8" fill="var(--copper-soft)" stroke="var(--copper)" stroke-width="1.4"/>
+          <text x="830" y="64" font-size="11" text-anchor="middle" fill="var(--muted)">fork tag of the shipped build</text>
+          <text x="830" y="92" font-size="20" text-anchor="middle" font-weight="600" fill="currentColor" font-family="var(--font-mono)">aix/1.140.06880</text>
+          <text x="830" y="118" font-size="10.5" text-anchor="middle" fill="var(--muted)" font-family="var(--font-mono)">e818874…  in tonykuttai/vscodium</text>
+        </g>
+        <g stroke="currentColor" stroke-width="1.4" marker-start="url(#v-arrow)" marker-end="url(#v-arrow)">
+          <line x1="312" y1="88" x2="358" y2="88"/><line x1="642" y1="88" x2="688" y2="88"/>
+        </g>
+        <text x="170" y="166" font-size="11" text-anchor="middle" fill="var(--muted)">the first digit of the build number is VS Code's patch level</text>
+        <text x="500" y="166" font-size="11" text-anchor="middle" fill="var(--muted)">the runner refuses a fork ref whose stable.json names another tag</text>
+        <text x="830" y="166" font-size="11" text-anchor="middle" fill="var(--muted)">any published build can be rebuilt from its tag</text>
+        <text x="500" y="196" font-size="11" text-anchor="middle" fill="var(--muted)">A rebuild under the same version bumps aix_build in the manifest (currently 3) so the extension can refresh an install.</text>
+      </svg>
+      </div>
+    </figure>
+  </div>
+</section>
+
+<section class="alt" id="install">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="eyebrow">Install</span>
+      <h2>Connect from VSCodium, or unpack it yourself</h2>
+    </div>
+    <div class="grid c2">
+      <div class="card">
+        <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7l5 5-5 5"/><path d="M12 17h8"/></svg></div>
+        <h3>With the extension</h3>
+        <ol class="steps">
+          <li><p>Install the <a href="https://github.com/tonykuttai/open-remote-ssh">AIX fork of open-remote-ssh</a> in VSCodium.</p></li>
+          <li><p>Add the AIX host to your SSH config and connect.</p></li>
+          <li><p>The extension downloads the server matching your VSCodium version, unpacks it under your home and starts it. If that version has no AIX build yet, it uses the latest one.</p></li>
+        </ol>
+      </div>
+      <div class="card">
+        <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 10l5 5 5-5"/><path d="M4 19h16"/></svg></div>
+        <h3>By hand, on the AIX host</h3>
+        <pre class="term" id="manual-install"><button class="copy" type="button" data-copy="manual-install" aria-label="Copy commands">Copy</button><span class="c"># V = VSCodium version, C = commit (both on the release page)</span>
+<span class="p">$</span> wget https://github.com/tonykuttai/vscodium-aix-server/releases/download/V/vscodium-reh-aix-ppc64-V.tar.gz
+<span class="p">$</span> mkdir -p ~/.vscodium-server/bin/C
+<span class="p">$</span> tar -xzf vscodium-reh-aix-ppc64-V.tar.gz -C ~/.vscodium-server/bin/C --strip-components 1
+<span class="p">$</span> ~/.vscodium-server/bin/C/bin/codium-server --version</pre>
+        <p class="small">Needs on the host:</p>
+        <div class="reqs">
+          <span class="badge">AIX 7.3, 64-bit kernel</span>
+          <span class="badge">Toolbox libstdc++ and libgcc (GCC 12+)</span>
+          <span class="badge">Toolbox krb5-libs</span>
+          <span class="badge">GNU tar</span>
+          <span class="badge copper">no root, no Node</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="contribute">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="eyebrow">Contribute</span>
+      <h2>Two repositories, both open</h2>
+    </div>
+    <div class="grid c3">
+      <div class="card">
+        <div class="icon copper"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3v12"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="6" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg></div>
+        <h3><a href="https://github.com/tonykuttai/vscodium">VSCodium fork</a></h3>
+        <p>Branch <code>aix</code>: patches, build scripts, smoke test.</p>
+      </div>
+      <div class="card">
+        <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/><path d="M3 12h2M19 12h2"/></svg></div>
+        <h3><a href="https://github.com/tonykuttai/vscodium-aix-server">Runner</a></h3>
+        <p>Builds, packages and publishes each release.</p>
+      </div>
+      <div class="card">
+        <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg></div>
+        <h3><a href="https://github.com/tonykuttai/vscodium-aix-server/issues">Issues</a></h3>
+        <p>Bug reports and AIX test results are welcome.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="alt" id="limits">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="eyebrow">Scope</span>
+      <h2>What to expect</h2>
+    </div>
+    <div class="limits">
+      <div class="limit"><b>Unofficial</b><span>Not affiliated with VSCodium, Microsoft or IBM. Community built and tested on one AIX 7.3 host.</span></div>
+      <div class="limit"><b>Polling file watching</b><span>By design, to stay away from AHAFS. External changes appear after a second or two; the Git view may need a refresh.</span></div>
+      <div class="limit"><b>AIX 7.3 ppc64 only</b><span>Built and smoke-tested there. AIX 7.2 TL5 is untested but likely to work.</span></div>
+      <div class="limit"><b>Smoke test, not a test suite</b><span>Addons load, the watcher delivers, ripgrep searches, the server boots and answers. Terminal spawning is checked by people, not yet by the gate.</span></div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div class="links">
+      <a href="https://github.com/tonykuttai/vscodium-aix-server/releases">Releases</a>
+      <a href="https://github.com/tonykuttai/vscodium-aix-server/issues">Issues</a>
+      <a href="https://github.com/tonykuttai/vscodium-aix-server#readme">README</a>
+      <a href="https://github.com/tonykuttai/vscodium-aix-server/blob/main/docs/DESIGN.md">Design</a>
+      <a href="https://github.com/tonykuttai/vscodium-aix-server/blob/main/docs/OPERATIONS.md">Operations</a>
+      <a href="https://github.com/tonykuttai/vscodium/blob/aix/docs/howto-build-aix.md">How to build</a>
+      <a href="https://github.com/tonykuttai/open-remote-ssh">open-remote-ssh for AIX</a>
+    </div>
+    <p>MIT licensed. VSCodium, Visual Studio Code, IBM, AIX and POWER are trademarks of their respective owners; this project only builds and publishes the open-source server for AIX.</p>
+  </div>
+</footer>
+
+<script>
+(function () {
+  function fallbackSelect(el) {
+    var r = document.createRange(); r.selectNodeContents(el);
+    var s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+  }
+  document.querySelectorAll('.copy').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var pre = document.getElementById(btn.getAttribute('data-copy'));
+      var text = Array.prototype.map.call(pre.childNodes, function (n) { return n === btn ? '' : n.textContent; }).join('')
+        .split('\n').map(function (l) { return l.replace(/^\$ /, ''); }).filter(function (l) { return l && l[0] !== '#'; }).join('\n');
+      var done = function () { btn.textContent = 'Copied'; setTimeout(function () { btn.textContent = 'Copy'; }, 1600); };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(done, function () { fallbackSelect(pre); });
+      } else { fallbackSelect(pre); }
+    });
+  });
+})();
+</script>
+</body>
+</html>

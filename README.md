@@ -9,6 +9,7 @@ VSCodium itself does not support AIX. These packages are what the
 installs on the remote machine so that a VSCodium desktop can open folders,
 terminals and extensions on AIX over SSH.
 
+* **Project site:** <https://tonykuttai.github.io/vscodium-aix-server/>
 * **Releases:** <https://github.com/tonykuttai/vscodium-aix-server/releases>
   (tag = VSCodium version, asset `vscodium-reh-aix-ppc64-<version>.tar.gz`)
 * **Issues:** <https://github.com/tonykuttai/vscodium-aix-server/issues>
