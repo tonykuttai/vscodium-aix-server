@@ -13,9 +13,12 @@ GH_API="https://api.github.com"
 gh_auth_args() {
     [[ -n "${GITHUB_TOKEN:-}" ]] || return 0
     local f="${VSX_STATE_DIR:-$HOME/.local/state/vsx}/.curl-github-auth"
-    if [[ ! -f "$f" ]] || ! grep -qF -- "$GITHUB_TOKEN" "$f" 2>/dev/null; then
+    local want
+    want=$(printf 'header = "Authorization: Bearer %s"' "$GITHUB_TOKEN")
+    # compare in-process: the token must not become an argument of grep either
+    if [[ ! -f "$f" || "$(<"$f")" != "$want" ]]; then
         mkdir -p "$(dirname "$f")"
-        ( umask 077; printf 'header = "Authorization: Bearer %s"\n' "$GITHUB_TOKEN" > "$f.tmp" ) && mv -f "$f.tmp" "$f"
+        ( umask 077; printf '%s\n' "$want" > "$f.tmp" ) && mv -f "$f.tmp" "$f"
     fi
     chmod 600 "$f"
     printf -- '-K\n%s\n' "$f"
