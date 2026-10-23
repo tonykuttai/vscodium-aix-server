@@ -32,7 +32,7 @@ that VS Code's own build runs natively on AIX: the JS half only needs Node 24
 (esbuild ships an `aix-ppc64` binary that is already in VS Code's lockfile),
 and the native half is the set of addons we already knew how to build. A
 full `gulp vscode-reh-aix-ppc64-min` takes about 8 minutes on
-`wyvernden6aix73` with a warm npm cache.
+the AIX 7.3 build host (POWER10) with a warm npm cache.
 
 The work is split the way VSCodium itself is split:
 

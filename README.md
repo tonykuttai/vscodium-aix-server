@@ -178,7 +178,7 @@ and the comments in `build/aix/*.sh`. Runner rationale and internals:
 ## 4. Setting up a build host
 
 This is what a maintainer does once on an AIX machine that will run the
-runner. The current host is `wyvernden6aix73`; nothing is specific to it.
+runner. Nothing is specific to the current build host; its name lives only in the maintainer's configuration.
 **No root is needed at any point**: everything that is not already in the
 Toolbox goes under `~/local`.
 
@@ -244,7 +244,7 @@ bin/vsx smoke ~/.cache/vsx/work/<version>/vscodium/vscode-reh-aix-ppc64   # re-r
 bin/vsx upload <version>                          # publish when happy
 ```
 
-With a warm npm cache a version takes about 8 minutes on `wyvernden6aix73`.
+With a warm npm cache a version takes about 8 minutes on the current build host (AIX 7.3, POWER10).
 
 ### 4.4 Enable automation
 

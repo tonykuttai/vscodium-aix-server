@@ -202,14 +202,14 @@ has the exact build commands for each tool.
 10. Only then: `vsx upload`, crontab. Make sure no other host still runs the
     cron job (next section).
 
-## Cut-over from cpap8104 (completed 2026-10-23)
+## Cut-over from the previous build host (completed 2026-10-23)
 
-Done on 2026-10-23: cpap8104's `vsx-cron.sh` entry was removed (its crontab is backed up in
-`~/crontab.backup.20261022-213915` there), wyvernden6aix73 runs the runner from cron, and 1.140.06880 was
+Done on 2026-10-23: the previous host's `vsx-cron.sh` entry was removed (its crontab is backed up in
+`~/crontab.backup.20261022-213915` there), the current host runs the runner from cron, and 1.140.06880 was
 republished from the new pipeline. The steps are kept for the next host move.
 
-`cpap8104` ran the previous pipeline (Linux tarball + transplanted modules)
-under cron until the source build was proven on `wyvernden6aix73`. Two hosts
+The previous host ran the previous pipeline (Linux tarball + transplanted modules)
+under cron until the source build was proven on the current host. Two hosts
 publishing to the same repository would race on `make_latest` and on
 assets. To move:
 
@@ -221,12 +221,12 @@ assets. To move:
    Node major, same launcher set; the source build additionally has AIX
    `sqlite3`/`kerberos` binaries and no ELF file left
    (`find . -type f | xargs file | grep ELF` must be empty).
-3. On cpap8104: `crontab -e`, remove the `vsx-cron.sh` line. Leave the
+3. On the old host: `crontab -e`, remove the `vsx-cron.sh` line. Leave the
    checkout and caches in place for one release cycle in case of rollback.
 4. On wyvernden: add the crontab line (README 4.4). Watch the first tick's
    log and the next day's digest.
 5. After one upstream release has been published from wyvernden without
-   intervention: `vsx prune --legacy` on cpap8104 and remove its checkout.
+   intervention: `vsx prune --legacy` on the old host and remove its checkout.
 
 ## Testing changes to vsx itself
 
